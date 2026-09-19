@@ -9,6 +9,7 @@ import CartModal from '../components/CartModal';
 import AddRecipeModal from '../components/AddRecipeModal';
 import EditRecipeModal from '../components/EditRecipeModal';
 import RandomMealModal from '../components/RandomMealModal';
+import FridgeCleanerModal from '../components/FridgeCleanerModal';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
@@ -30,6 +31,7 @@ export default function Home() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
   const [isRandomOpen, setIsRandomOpen] = useState(false);
+  const [isFridgeOpen, setIsFridgeOpen] = useState(false);
 
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
@@ -184,6 +186,29 @@ export default function Home() {
     }
   };
 
+  // Xử lý thêm nguyên liệu còn thiếu từ modal Dọn tủ lạnh vào giỏ
+  const handleAddMissingToCart = async (dishTitle, missingItems) => {
+    const newItems = missingItems.map((text) => ({
+      dish: dishTitle,
+      text: text,
+    }));
+
+    try {
+      const res = await fetch('/api/shopping-list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItems),
+      });
+
+      if (!res.ok) throw new Error('Không thể thêm vào giỏ');
+      const addedData = await res.json();
+      setShoppingList((prev) => [...prev, ...addedData]);
+      alert(`Đã thêm ${missingItems.length} nguyên liệu còn thiếu vào giỏ đi chợ!`);
+    } catch (err) {
+      alert('Lỗi: ' + err.message);
+    }
+  };
+
   const handleRecipeAdded = (newRecipe) => {
     const formattedItem = formatRecipe(newRecipe);
     setRecipes((prev) => {
@@ -269,7 +294,7 @@ export default function Home() {
         <h1>🍳 Bếp Nhà Món Ngon</h1>
       </header>
 
-      {/* Thanh tìm kiếm, Random và Tabs */}
+      {/* Thanh tìm kiếm, Random, Dọn tủ lạnh và Tabs */}
       <div className="search-bar">
         <input
           type="text"
@@ -295,6 +320,13 @@ export default function Home() {
           style={{ background: '#f39c12', color: '#fff', border: 'none', fontWeight: 'bold' }}
         >
           🎲 Hôm nay ăn gì?
+        </button>
+        <button
+          onClick={() => setIsFridgeOpen(true)}
+          className="btn-filter"
+          style={{ background: '#27ae60', color: '#fff', border: 'none', fontWeight: 'bold' }}
+        >
+          🧊 Dọn tủ lạnh
         </button>
         <button onClick={() => setIsAddOpen(true)} className="btn-primary">
           + Đăng công thức mới
@@ -513,6 +545,14 @@ export default function Home() {
         recipes={recipes}
         onClose={() => setIsRandomOpen(false)}
         onOpenDetail={openDetail}
+      />
+
+      <FridgeCleanerModal
+        isOpen={isFridgeOpen}
+        recipes={recipes}
+        onClose={() => setIsFridgeOpen(false)}
+        onOpenDetail={openDetail}
+        onAddMissingToCart={handleAddMissingToCart}
       />
     </div>
   );
