@@ -10,6 +10,7 @@ import AddRecipeModal from '../components/AddRecipeModal';
 import EditRecipeModal from '../components/EditRecipeModal';
 import RandomMealModal from '../components/RandomMealModal';
 import FridgeCleanerModal from '../components/FridgeCleanerModal';
+import MealPlannerModal from '../components/MealPlannerModal';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
@@ -32,6 +33,7 @@ export default function Home() {
   const [editRecipe, setEditRecipe] = useState(null);
   const [isRandomOpen, setIsRandomOpen] = useState(false);
   const [isFridgeOpen, setIsFridgeOpen] = useState(false);
+  const [isPlannerOpen, setIsPlannerOpen] = useState(false);
 
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
@@ -209,6 +211,38 @@ export default function Home() {
     }
   };
 
+  // Nạp toàn bộ nguyên liệu của các món trong thực đơn tuần vào giỏ đi chợ
+  const handleAddPlanToCart = async (plannedRecipes) => {
+    const newItems = [];
+    plannedRecipes.forEach((recipe) => {
+      (recipe.ingredients || []).forEach((ing) => {
+        if (typeof ing === 'string') {
+          newItems.push({ dish: recipe.title, text: ing });
+        } else {
+          newItems.push({
+            dish: recipe.title,
+            text: `${ing.name}: ${(ing.amountPerPerson || 1) * 2} ${ing.unit || ''}`.trim(),
+          });
+        }
+      });
+    });
+
+    try {
+      const res = await fetch('/api/shopping-list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItems),
+      });
+
+      if (!res.ok) throw new Error('Không thể nạp vào giỏ');
+      const addedData = await res.json();
+      setShoppingList((prev) => [...prev, ...addedData]);
+      alert(`🎉 Đã nạp thành công toàn bộ nguyên liệu cả tuần vào giỏ đi chợ!`);
+    } catch (err) {
+      alert('Lỗi: ' + err.message);
+    }
+  };
+
   const handleRecipeAdded = (newRecipe) => {
     const formattedItem = formatRecipe(newRecipe);
     setRecipes((prev) => {
@@ -294,7 +328,7 @@ export default function Home() {
         <h1>🍳 Bếp Nhà Món Ngon</h1>
       </header>
 
-      {/* Thanh tìm kiếm, Random, Dọn tủ lạnh và Tabs */}
+      {/* Thanh tìm kiếm, Random, Dọn tủ lạnh, Lịch tuần và Tabs */}
       <div className="search-bar">
         <input
           type="text"
@@ -327,6 +361,13 @@ export default function Home() {
           style={{ background: '#27ae60', color: '#fff', border: 'none', fontWeight: 'bold' }}
         >
           🧊 Dọn tủ lạnh
+        </button>
+        <button
+          onClick={() => setIsPlannerOpen(true)}
+          className="btn-filter"
+          style={{ background: '#8e44ad', color: '#fff', border: 'none', fontWeight: 'bold' }}
+        >
+          📅 Lịch tuần
         </button>
         <button onClick={() => setIsAddOpen(true)} className="btn-primary">
           + Đăng công thức mới
@@ -553,6 +594,14 @@ export default function Home() {
         onClose={() => setIsFridgeOpen(false)}
         onOpenDetail={openDetail}
         onAddMissingToCart={handleAddMissingToCart}
+      />
+
+      <MealPlannerModal
+        isOpen={isPlannerOpen}
+        recipes={recipes}
+        onClose={() => setIsPlannerOpen(false)}
+        onOpenDetail={openDetail}
+        onAddPlanToCart={handleAddPlanToCart}
       />
     </div>
   );
