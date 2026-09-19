@@ -15,17 +15,26 @@ export const metadata = {
   title: 'Bếp Nhà Món Ngon',
   description: 'Sổ tay công thức và giỏ đi chợ gia đình',
   manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Bếp Nhà',
+  },
+};
+
+export const viewport = {
+  themeColor: '#e67e22',
 };
 
 export default function RootLayout({ children }) {
   return (
     <html
-      lang="en"
+      lang="vi"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body suppressHydrationWarning>
-  {children}
-</body>
+        {children}
+      </body>
     </html>
   );
 }
