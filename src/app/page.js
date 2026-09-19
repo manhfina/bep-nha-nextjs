@@ -269,8 +269,7 @@ export default function Home() {
   return (
     <div className="container">
       <header>
-        <h1>🍳 Bếp Nhà Món Ngon</h1>
-        <p>Kết nối Cơ sở dữ liệu Cloud PostgreSQL (Supabase)</p>
+  <h1>🍳 Bếp Nhà Món Ngon</h1>
       </header>
 
       {/* Thanh tìm kiếm và Tabs */}
