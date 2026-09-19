@@ -8,6 +8,7 @@ import CookModeModal from '../components/CookModeModal';
 import CartModal from '../components/CartModal';
 import AddRecipeModal from '../components/AddRecipeModal';
 import EditRecipeModal from '../components/EditRecipeModal';
+import RandomMealModal from '../components/RandomMealModal';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
@@ -28,6 +29,7 @@ export default function Home() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
+  const [isRandomOpen, setIsRandomOpen] = useState(false);
 
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
@@ -225,12 +227,10 @@ export default function Home() {
 
   // Lọc đa tiêu chí
   const filteredRecipes = recipes.filter((item) => {
-    // 1. Tên hoặc mô tả
     const matchSearch =
       item.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.desc?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    // 2. Tag tủ lạnh
     const matchTag = selectedTag
       ? (item.ingredients || []).some((ing) => {
           const ingText = typeof ing === 'string' ? ing : ing.name || '';
@@ -238,14 +238,11 @@ export default function Home() {
         })
       : true;
 
-    // 3. Tab yêu thích
     const matchTab = currentTab === 'fav' ? favorites.includes(String(item.id)) : true;
 
-    // 4. Độ khó
     const matchDifficulty =
       selectedDifficulty === 'all' ? true : item.difficulty === selectedDifficulty;
 
-    // 5. Thời gian nấu (phút)
     const minutes = parseInt(item.time) || 0;
     let matchTime = true;
     if (selectedTimeRange === 'under15') {
@@ -269,10 +266,10 @@ export default function Home() {
   return (
     <div className="container">
       <header>
-  <h1>🍳 Bếp Nhà Món Ngon</h1>
+        <h1>🍳 Bếp Nhà Món Ngon</h1>
       </header>
 
-      {/* Thanh tìm kiếm và Tabs */}
+      {/* Thanh tìm kiếm, Random và Tabs */}
       <div className="search-bar">
         <input
           type="text"
@@ -291,6 +288,13 @@ export default function Home() {
           className={`btn-filter ${currentTab === 'fav' ? 'active' : ''}`}
         >
           ❤️ Yêu thích ({favorites.length})
+        </button>
+        <button
+          onClick={() => setIsRandomOpen(true)}
+          className="btn-filter"
+          style={{ background: '#f39c12', color: '#fff', border: 'none', fontWeight: 'bold' }}
+        >
+          🎲 Hôm nay ăn gì?
         </button>
         <button onClick={() => setIsAddOpen(true)} className="btn-primary">
           + Đăng công thức mới
@@ -502,6 +506,13 @@ export default function Home() {
         recipe={editRecipe}
         onClose={() => setEditRecipe(null)}
         onRecipeUpdated={handleRecipeUpdated}
+      />
+
+      <RandomMealModal
+        isOpen={isRandomOpen}
+        recipes={recipes}
+        onClose={() => setIsRandomOpen(false)}
+        onOpenDetail={openDetail}
       />
     </div>
   );

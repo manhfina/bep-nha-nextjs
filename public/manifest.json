@@ -1,0 +1,21 @@
+{
+  "name": "Bếp Nhà Món Ngon",
+  "short_name": "Bếp Nhà",
+  "description": "Sổ tay công thức và giỏ đi chợ gia đình",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fffbf0",
+  "theme_color": "#e67e22",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=192&auto=format&fit=crop&q=80",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=512&auto=format&fit=crop&q=80",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
