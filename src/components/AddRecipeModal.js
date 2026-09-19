@@ -1,15 +1,12 @@
 'use client';
 import { useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { supabase } from '@/lib/supabase';
 
 export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewImage, setPreviewImage] = useState('');
+  const [useCustomUrl, setUseCustomUrl] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -31,6 +28,12 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Giới hạn dung lượng tối đa 5MB
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Vui lòng chọn ảnh có dung lượng dưới 5MB!');
+      return;
+    }
 
     setPreviewImage(URL.createObjectURL(file));
     setUploading(true);
@@ -57,11 +60,16 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
 
       setFormData((prev) => ({ ...prev, image_url: publicData.publicUrl }));
     } catch (err) {
-      alert('Lỗi tải ảnh: ' + err.message);
+      alert('Lỗi tải ảnh lên Supabase: ' + err.message);
       setPreviewImage('');
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleRemoveImage = () => {
+    setPreviewImage('');
+    setFormData((prev) => ({ ...prev, image_url: '' }));
   };
 
   const handleSubmit = async (e) => {
@@ -74,13 +82,11 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
         .split('\n')
         .map((item) => item.trim())
         .filter(Boolean)
-        .map((line) => {
-          return {
-            name: line,
-            amountPerPerson: 1,
-            unit: '',
-          };
-        });
+        .map((line) => ({
+          name: line,
+          amountPerPerson: 1,
+          unit: '',
+        }));
 
       // Chuẩn hóa các bước nấu thành mảng chuỗi
       const instructionsArray = formData.instructions
@@ -88,7 +94,7 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
         .map((item) => item.trim())
         .filter(Boolean);
 
-      // Map chính xác tên cột với bảng recipes trong Supabase
+      // Map dữ liệu với cấu trúc bảng recipes
       const payload = {
         title: formData.title,
         desc: formData.description,
@@ -96,6 +102,7 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
         difficulty: formData.difficulty,
         image:
           formData.image_url ||
+          previewImage ||
           'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
         base_servings: 2,
         ingredients: ingredientsArray,
@@ -198,26 +205,78 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
             </div>
           </div>
 
+          {/* Khu vực Upload / Nhập link ảnh */}
           <div style={modalStyles.formGroup}>
-            <label style={modalStyles.label}>Chọn ảnh từ máy tính</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              style={{ ...modalStyles.input, padding: '8px' }}
-            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={modalStyles.label}>Hình ảnh món ăn</label>
+              <button
+                type="button"
+                onClick={() => setUseCustomUrl(!useCustomUrl)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#e67e22',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                {useCustomUrl ? 'Tải ảnh từ máy' : 'Dán link ảnh có sẵn'}
+              </button>
+            </div>
+
+            {useCustomUrl ? (
+              <input
+                type="url"
+                name="image_url"
+                value={formData.image_url}
+                onChange={(e) => {
+                  handleChange(e);
+                  setPreviewImage(e.target.value);
+                }}
+                placeholder="https://images.unsplash.com/..."
+                style={modalStyles.input}
+              />
+            ) : (
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                style={{ ...modalStyles.input, padding: '8px' }}
+              />
+            )}
+
             {uploading && (
               <span style={{ fontSize: '0.8rem', color: '#e67e22', fontWeight: 'bold' }}>
                 ⏳ Đang tải ảnh lên Supabase Storage...
               </span>
             )}
+
             {previewImage && (
-              <div style={{ marginTop: '8px' }}>
+              <div style={{ marginTop: '8px', position: 'relative' }}>
                 <img
                   src={previewImage}
                   alt="Xem trước ảnh"
-                  style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '10px' }}
+                  style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '10px' }}
                 />
+                <button
+                  type="button"
+                  onClick={handleRemoveImage}
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '8px',
+                    background: 'rgba(0,0,0,0.65)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '26px',
+                    height: '26px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✕
+                </button>
               </div>
             )}
           </div>
@@ -253,9 +312,12 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
             <button
               type="submit"
               disabled={loading || uploading}
-              style={modalStyles.btnSubmit}
+              style={{
+                ...modalStyles.btnSubmit,
+                opacity: loading || uploading ? 0.6 : 1,
+              }}
             >
-              {loading ? 'Đang lưu...' : 'Lưu công thức'}
+              {loading ? 'Đang lưu...' : uploading ? 'Chờ tải ảnh...' : 'Lưu công thức'}
             </button>
           </div>
         </form>
