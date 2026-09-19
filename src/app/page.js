@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 import RecipeCard from '../components/RecipeCard';
 import RecipeDetailModal from '../components/RecipeDetailModal';
 import CookModeModal from '../components/CookModeModal';
@@ -32,6 +33,19 @@ export default function Home() {
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
 
+  // Hàm chuẩn hóa dữ liệu món ăn
+  const formatRecipe = (item) => ({
+    ...item,
+    desc: item.desc || item.description || '',
+    time: item.time || (item.cook_time ? `${item.cook_time} phút` : '15 phút'),
+    image:
+      item.image ||
+      item.image_url ||
+      'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
+    baseServings: item.base_servings || item.baseServings || 2,
+    steps: item.steps || item.instructions || [],
+  });
+
   // 1. Tải công thức từ API
   const fetchRecipes = async () => {
     setLoading(true);
@@ -39,18 +53,7 @@ export default function Home() {
       const res = await fetch('/api/recipes');
       const data = await res.json();
       if (Array.isArray(data)) {
-        const formatted = data.map((item) => ({
-          ...item,
-          desc: item.desc || item.description || '',
-          time: item.time || (item.cook_time ? `${item.cook_time} phút` : '15 phút'),
-          image:
-            item.image ||
-            item.image_url ||
-            'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
-          baseServings: item.base_servings || item.baseServings || 2,
-          steps: item.steps || item.instructions || [],
-        }));
-        setRecipes(formatted);
+        setRecipes(data.map(formatRecipe));
       } else {
         console.error('Lỗi tải dữ liệu:', data);
       }
@@ -78,6 +81,37 @@ export default function Home() {
         if (Array.isArray(items)) setShoppingList(items);
       })
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
+
+    // Lắng nghe sự kiện Realtime từ Supabase cho bảng recipes
+    const channel = supabase
+      .channel('realtime-recipes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'recipes' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newFormatted = formatRecipe(payload.new);
+            setRecipes((prev) => {
+              if (prev.some((r) => r.id === newFormatted.id)) return prev;
+              return [newFormatted, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedFormatted = formatRecipe(payload.new);
+            setRecipes((prev) =>
+              prev.map((r) => (r.id === updatedFormatted.id ? updatedFormatted : r))
+            );
+            setActiveRecipe((prev) => (prev?.id === updatedFormatted.id ? updatedFormatted : prev));
+          } else if (payload.eventType === 'DELETE') {
+            setRecipes((prev) => prev.filter((r) => r.id !== payload.old.id));
+            setActiveRecipe((prev) => (prev?.id === payload.old.id ? null : prev));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const toggleFavorite = async (e, id) => {
@@ -149,29 +183,15 @@ export default function Home() {
   };
 
   const handleRecipeAdded = (newRecipe) => {
-    const formattedItem = {
-      ...newRecipe,
-      desc: newRecipe.desc || newRecipe.description || '',
-      time: newRecipe.time || (newRecipe.cook_time ? `${newRecipe.cook_time} phút` : '15 phút'),
-      image:
-        newRecipe.image ||
-        newRecipe.image_url ||
-        'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
-      baseServings: newRecipe.base_servings || newRecipe.baseServings || 2,
-      steps: newRecipe.steps || newRecipe.instructions || [],
-    };
-    setRecipes((prev) => [formattedItem, ...prev]);
+    const formattedItem = formatRecipe(newRecipe);
+    setRecipes((prev) => {
+      if (prev.some((r) => r.id === formattedItem.id)) return prev;
+      return [formattedItem, ...prev];
+    });
   };
 
   const handleRecipeUpdated = (updatedRecipe) => {
-    const formatted = {
-      ...updatedRecipe,
-      desc: updatedRecipe.desc || updatedRecipe.description || '',
-      time: updatedRecipe.time || `${updatedRecipe.cook_time || 15} phút`,
-      image: updatedRecipe.image || updatedRecipe.image_url,
-      baseServings: updatedRecipe.base_servings || 2,
-      steps: updatedRecipe.steps || [],
-    };
+    const formatted = formatRecipe(updatedRecipe);
     setRecipes((prev) => prev.map((r) => (r.id === formatted.id ? formatted : r)));
     if (activeRecipe?.id === formatted.id) setActiveRecipe(formatted);
   };
