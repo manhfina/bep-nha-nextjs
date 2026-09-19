@@ -1,13 +1,85 @@
 'use client';
+import { useState } from 'react';
 
 export default function CartModal({
   isOpen,
-  shoppingList,
+  shoppingList = [],
   onClose,
   onRemoveItem,
   onClearCart,
 }) {
+  const [viewMode, setViewMode] = useState('merged'); // 'merged' hoặc 'byDish'
+  const [checkedItems, setCheckedItems] = useState({});
+
   if (!isOpen) return null;
+
+  // Toggle trạng thái đã mua của từng dòng
+  const toggleChecked = (key) => {
+    setCheckedItems((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  // Logic gom nhóm các nguyên liệu trùng tên
+  const mergedList = shoppingList.reduce((acc, item) => {
+    const rawText = (item.text || '').trim();
+    // Tách lấy tên nguyên liệu (trước dấu hai chấm nếu có)
+    const namePart = rawText.includes(':') ? rawText.split(':')[0].trim() : rawText;
+    const key = namePart.toLowerCase();
+
+    if (!acc[key]) {
+      acc[key] = {
+        name: namePart,
+        details: [rawText],
+        dishes: [item.dish],
+        ids: [item.id],
+      };
+    } else {
+      acc[key].details.push(rawText);
+      if (!acc[key].dishes.includes(item.dish)) {
+        acc[key].dishes.push(item.dish);
+      }
+      acc[key].ids.push(item.id);
+    }
+    return acc;
+  }, {});
+
+  const mergedItems = Object.values(mergedList);
+
+  // Xử lý sao chép văn bản để gửi qua Zalo
+  const handleCopyForZalo = () => {
+    if (shoppingList.length === 0) return;
+
+    let textToSend = '🛒 DANH SÁCH NGUYÊN LIỆU ĐI CHỢ:\n';
+    textToSend += '────────────────────\n';
+
+    if (viewMode === 'merged') {
+      mergedItems.forEach((item, index) => {
+        textToSend += `${index + 1}. ${item.name} (${item.dishes.join(', ')})\n`;
+        // Nếu có chi tiết định lượng cụ thể thì đính kèm
+        if (item.details.length > 0 && item.details.some((d) => d.includes(':'))) {
+          textToSend += `   👉 ${item.details.join(' + ')}\n`;
+        }
+      });
+    } else {
+      shoppingList.forEach((item, index) => {
+        textToSend += `${index + 1}. ${item.text} [${item.dish}]\n`;
+      });
+    }
+
+    textToSend += '────────────────────\n';
+    textToSend += 'Mua giúp mình nhé, cảm ơn nhiều! ❤️';
+
+    navigator.clipboard
+      .writeText(textToSend)
+      .then(() => {
+        alert('Đã sao chép danh sách đi chợ! Giờ bạn chỉ cần mở Zalo và dán (Paste) để gửi.');
+      })
+      .catch((err) => {
+        alert('Không thể sao chép tự động: ' + err.message);
+      });
+  };
 
   return (
     <div style={cartStyles.overlay} onClick={onClose}>
@@ -16,8 +88,15 @@ export default function CartModal({
           ✕
         </button>
 
+        {/* Tiêu đề Modal */}
         <div style={cartStyles.header}>
-          <h2 style={cartStyles.title}>🛒 Giỏ đi chợ</h2>
+          <div>
+            <h2 style={cartStyles.title}>🛒 Giỏ đi chợ</h2>
+            <span style={{ fontSize: '0.8rem', color: '#888' }}>
+              {shoppingList.length} nguyên liệu cần mua
+            </span>
+          </div>
+
           {shoppingList.length > 0 && (
             <button onClick={onClearCart} style={cartStyles.btnClear}>
               Xóa tất cả
@@ -25,6 +104,31 @@ export default function CartModal({
           )}
         </div>
 
+        {/* Thanh chọn chế độ xem */}
+        {shoppingList.length > 0 && (
+          <div style={cartStyles.tabContainer}>
+            <button
+              onClick={() => setViewMode('merged')}
+              style={{
+                ...cartStyles.tabBtn,
+                ...(viewMode === 'merged' ? cartStyles.tabActive : {}),
+              }}
+            >
+              Gộp nguyên liệu ({mergedItems.length})
+            </button>
+            <button
+              onClick={() => setViewMode('byDish')}
+              style={{
+                ...cartStyles.tabBtn,
+                ...(viewMode === 'byDish' ? cartStyles.tabActive : {}),
+              }}
+            >
+              Theo từng món ({shoppingList.length})
+            </button>
+          </div>
+        )}
+
+        {/* Nội dung danh sách */}
         {shoppingList.length === 0 ? (
           <div style={cartStyles.emptyState}>
             <p style={{ fontSize: '2.5rem', margin: 0 }}>🥬</p>
@@ -34,21 +138,104 @@ export default function CartModal({
           </div>
         ) : (
           <div style={cartStyles.list}>
-            {shoppingList.map((item) => (
-              <div key={item.id} style={cartStyles.item}>
-                <div>
-                  <span style={cartStyles.dishName}>[{item.dish}]</span>
-                  <p style={cartStyles.itemText}>{item.text}</p>
-                </div>
-                <button
-                  onClick={() => onRemoveItem(item.id)}
-                  style={cartStyles.btnDelete}
-                  title="Xóa món này"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            {viewMode === 'merged'
+              ? mergedItems.map((item, idx) => {
+                  const itemKey = `merged-${item.name}`;
+                  const isDone = !!checkedItems[itemKey];
+
+                  return (
+                    <div
+                      key={itemKey}
+                      style={{
+                        ...cartStyles.item,
+                        opacity: isDone ? 0.55 : 1,
+                        backgroundColor: isDone ? '#edf2f7' : '#f8f9fa',
+                      }}
+                      onClick={() => toggleChecked(itemKey)}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isDone}
+                        onChange={() => {}}
+                        style={{ cursor: 'pointer', transform: 'scale(1.15)', marginRight: '10px' }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span
+                            style={{
+                              ...cartStyles.itemText,
+                              fontWeight: '600',
+                              textDecoration: isDone ? 'line-through' : 'none',
+                            }}
+                          >
+                            {item.name}
+                          </span>
+                        </div>
+                        <span style={cartStyles.dishName}>
+                          Dùng cho: {item.dishes.join(', ')}
+                        </span>
+                        {item.details.length > 1 && (
+                          <p style={{ margin: '3px 0 0 0', fontSize: '0.75rem', color: '#718096' }}>
+                            Chi tiết: {item.details.join(' + ')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              : shoppingList.map((item) => {
+                  const itemKey = `single-${item.id}`;
+                  const isDone = !!checkedItems[itemKey];
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        ...cartStyles.item,
+                        opacity: isDone ? 0.55 : 1,
+                        backgroundColor: isDone ? '#edf2f7' : '#f8f9fa',
+                      }}
+                      onClick={() => toggleChecked(itemKey)}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isDone}
+                        onChange={() => {}}
+                        style={{ cursor: 'pointer', transform: 'scale(1.15)', marginRight: '10px' }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <span style={cartStyles.dishName}>[{item.dish}]</span>
+                        <p
+                          style={{
+                            ...cartStyles.itemText,
+                            textDecoration: isDone ? 'line-through' : 'none',
+                          }}
+                        >
+                          {item.text}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveItem(item.id);
+                        }}
+                        style={cartStyles.btnDelete}
+                        title="Xóa món này"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+          </div>
+        )}
+
+        {/* Chân Modal: Nút gửi Zalo / Sao chép */}
+        {shoppingList.length > 0 && (
+          <div style={cartStyles.footer}>
+            <button onClick={handleCopyForZalo} style={cartStyles.btnZalo}>
+              📲 Gửi qua Zalo / Sao chép danh sách
+            </button>
           </div>
         )}
       </div>
@@ -73,10 +260,11 @@ const cartStyles = {
   modal: {
     backgroundColor: '#fff',
     borderRadius: '24px',
-    maxWidth: '480px',
+    maxWidth: '500px',
     width: '100%',
     maxHeight: '85vh',
-    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
     padding: '24px',
     boxShadow: '0 20px 45px rgba(0,0,0,0.25)',
     position: 'relative',
@@ -95,12 +283,13 @@ const cartStyles = {
     cursor: 'pointer',
     fontWeight: 'bold',
     color: '#666',
+    zIndex: 1,
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '16px',
+    marginBottom: '14px',
     paddingRight: '36px',
   },
   title: {
@@ -117,6 +306,31 @@ const cartStyles = {
     fontWeight: '600',
     cursor: 'pointer',
   },
+  tabContainer: {
+    display: 'flex',
+    gap: '8px',
+    marginBottom: '14px',
+    background: '#f1f2f6',
+    padding: '4px',
+    borderRadius: '12px',
+  },
+  tabBtn: {
+    flex: 1,
+    border: 'none',
+    background: 'transparent',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    fontSize: '0.8rem',
+    fontWeight: '600',
+    color: '#636e72',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  tabActive: {
+    background: '#fff',
+    color: '#2d3436',
+    boxShadow: '0 2px 5px rgba(0,0,0,0.08)',
+  },
   emptyState: {
     textAlign: 'center',
     padding: '40px 10px',
@@ -125,20 +339,24 @@ const cartStyles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',
+    overflowY: 'auto',
+    maxHeight: '48vh',
+    paddingRight: '4px',
   },
   item: {
     display: 'flex',
-    justifyContent: 'space-between',
     alignItems: 'center',
     padding: '10px 14px',
-    backgroundColor: '#f8f9fa',
     borderRadius: '12px',
-    border: '1px solid #f1f2f6',
+    border: '1px solid #edf2f7',
+    cursor: 'pointer',
+    transition: 'background 0.15s',
   },
   dishName: {
     fontSize: '0.75rem',
     color: '#e67e22',
     fontWeight: '600',
+    display: 'block',
   },
   itemText: {
     margin: '2px 0 0 0',
@@ -151,7 +369,27 @@ const cartStyles = {
     border: 'none',
     color: '#b2bec3',
     cursor: 'pointer',
+    fontSize: '1rem',
+    padding: '4px 8px',
+  },
+  footer: {
+    marginTop: '16px',
+    paddingTop: '14px',
+    borderTop: '1px solid #f1f2f6',
+  },
+  btnZalo: {
+    width: '100%',
+    backgroundColor: '#0068FF',
+    color: '#fff',
+    border: 'none',
+    padding: '12px',
+    borderRadius: '12px',
+    fontWeight: '700',
     fontSize: '0.9rem',
-    padding: '4px',
+    cursor: 'pointer',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '8px',
   },
 };
