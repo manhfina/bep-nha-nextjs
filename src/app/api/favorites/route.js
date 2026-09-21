@@ -1,56 +1,74 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// GET: Lấy danh sách ID món yêu thích của user
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const userId = searchParams.get('userId');
 
-// 1. Lấy danh sách ID các món đã thích
-export async function GET() {
-  try {
-    const { data, error } = await supabase
-      .from('favorites')
-      .select('recipe_id');
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const ids = (data || []).map((item) => String(item.recipe_id));
-    return NextResponse.json(ids);
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  let query = supabase.from('favorites').select('recipe_id');
+  if (userId) {
+    query = query.eq('user_id', userId);
+  } else {
+    // Nếu chưa đăng nhập, lấy các bản ghi không gán user_id hoặc trả về rỗng
+    query = query.is('user_id', null);
   }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const favoriteRecipeIds = data.map((item) => String(item.recipe_id));
+  return NextResponse.json(favoriteRecipeIds);
 }
 
-// 2. Thêm hoặc Bỏ yêu thích
+// POST: Thêm hoặc Xóa món yêu thích theo user
 export async function POST(request) {
   try {
-    const { recipeId } = await request.json();
+    const { recipeId, userId } = await request.json();
 
     if (!recipeId) {
       return NextResponse.json({ error: 'Thiếu recipeId' }, { status: 400 });
     }
 
-    // Kiểm tra xem món này đã được thích chưa
-    const { data: existing, error: findError } = await supabase
+    // Kiểm tra xem món này đã được yêu thích bởi user chưa
+    let checkQuery = supabase
       .from('favorites')
       .select('id')
-      .eq('recipe_id', recipeId)
-      .maybeSingle();
+      .eq('recipe_id', recipeId);
 
-    if (findError) {
-      return NextResponse.json({ error: findError.message }, { status: 500 });
+    if (userId) {
+      checkQuery = checkQuery.eq('user_id', userId);
+    } else {
+      checkQuery = checkQuery.is('user_id', null);
     }
 
+    const { data: existing, error: findError } = await checkQuery.maybeSingle();
+
+    if (findError) throw findError;
+
     if (existing) {
-      // Đã có -> Bỏ thích
-      await supabase.from('favorites').delete().eq('recipe_id', recipeId);
-      return NextResponse.json({ status: 'removed', recipeId });
+      // Đã có -> Xóa khỏi yêu thích
+      const { error: deleteError } = await supabase
+        .from('favorites')
+        .delete()
+        .eq('id', existing.id);
+
+      if (deleteError) throw deleteError;
+      return NextResponse.json({ action: 'removed', recipeId });
     } else {
-      // Chưa có -> Thêm vào bảng favorites
-      await supabase.from('favorites').insert([{ recipe_id: recipeId }]);
-      return NextResponse.json({ status: 'added', recipeId });
+      // Chưa có -> Thêm mới
+      const insertData = { recipe_id: recipeId };
+      if (userId) insertData.user_id = userId;
+
+      const { error: insertError } = await supabase
+        .from('favorites')
+        .insert([insertData]);
+
+      if (insertError) throw insertError;
+      return NextResponse.json({ action: 'added', recipeId });
     }
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -1,83 +1,81 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// GET: Lấy các nguyên liệu trong giỏ của user
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const userId = searchParams.get('userId');
 
-// 1. Lấy toàn bộ danh sách đồ cần mua trong giỏ
-export async function GET() {
-  try {
-    const { data, error } = await supabase
-      .from('shopping_list')
-      .select('*')
-      .order('id', { ascending: true });
+  let query = supabase
+    .from('shopping_list')
+    .select('*')
+    .order('created_at', { ascending: true });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json(data || []);
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  if (userId) {
+    query = query.eq('user_id', userId);
+  } else {
+    query = query.is('user_id', null);
   }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json(data);
 }
 
-// 2. Thêm một hoặc nhiều nguyên liệu vào giỏ
+// POST: Thêm nguyên liệu vào giỏ của user
 export async function POST(request) {
   try {
-    const body = await request.json(); // Nhận vào mảng các món hoặc 1 món { dish, text }
-    const items = Array.isArray(body) ? body : [body];
+    const body = await request.json();
+    const { items, userId } = Array.isArray(body)
+      ? { items: body, userId: null }
+      : { items: body.items || [body], userId: body.userId || null };
 
-    const insertData = items.map((item) => ({
-      dish: item.dish || '',
+    const itemsToInsert = items.map((item) => ({
+      dish: item.dish,
       text: item.text,
+      user_id: userId || item.userId || null,
     }));
 
     const { data, error } = await supabase
       .from('shopping_list')
-      .insert(insertData)
+      .insert(itemsToInsert)
       .select();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
+    if (error) throw error;
     return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// 3. Xóa một món theo ID hoặc xóa sạch giỏ
+// DELETE: Xóa 1 món hoặc xóa toàn bộ giỏ của user
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
+    const userId = searchParams.get('userId');
+
+    let query = supabase.from('shopping_list').delete();
 
     if (id) {
-      // Xóa 1 món cụ thể
-      const { error } = await supabase
-        .from('shopping_list')
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-      return NextResponse.json({ success: true, removedId: id });
+      // Xóa 1 dòng cụ thể
+      query = query.eq('id', id);
+    } else if (userId) {
+      // Dọn giỏ của riêng user đó
+      query = query.eq('user_id', userId);
     } else {
-      // Xóa toàn bộ giỏ đi chợ
-      const { error } = await supabase
-        .from('shopping_list')
-        .delete()
-        .neq('id', 0);
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-      return NextResponse.json({ success: true, cleared: true });
+      // Dọn giỏ của khách vãng lai (null)
+      query = query.is('user_id', null);
     }
+
+    const { error } = await query;
+    if (error) throw error;
+
+    return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

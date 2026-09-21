@@ -75,7 +75,8 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetchRecipes();
+    loadUserData(user?.id);
+  }, [user]);
 
     // Kiểm tra phiên đăng nhập hiện tại
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -89,22 +90,25 @@ export default function Home() {
       setUser(session?.user ?? null);
     });
 
-    // Tải favorites từ API Supabase
-    fetch('/api/favorites')
+    const loadUserData = (currentUserId) => {
+    const userParam = currentUserId ? `?userId=${currentUserId}` : '';
+
+    // Tải favorites theo user
+    fetch(`/api/favorites${userParam}`)
       .then((res) => res.json())
       .then((ids) => {
         if (Array.isArray(ids)) setFavorites(ids.map(String));
       })
       .catch((err) => console.error('Lỗi tải favorites:', err));
 
-    // Tải shopping-list từ API Supabase
-    fetch('/api/shopping-list')
+    // Tải shopping-list theo user
+    fetch(`/api/shopping-list${userParam}`)
       .then((res) => res.json())
       .then((items) => {
         if (Array.isArray(items)) setShoppingList(items);
       })
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
-
+      };
     // Lắng nghe sự kiện Realtime từ Supabase cho bảng recipes
     const channel = supabase
       .channel('realtime-recipes')
@@ -148,22 +152,17 @@ export default function Home() {
       : [...favorites, targetId];
 
     setFavorites(updatedFavs);
-    localStorage.setItem('fav_recipes', JSON.stringify(updatedFavs));
 
     try {
       const res = await fetch('/api/favorites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipeId: id }),
+        body: JSON.stringify({ recipeId: id, userId: user?.id || null }),
       });
 
       if (!res.ok) throw new Error('Lỗi cập nhật yêu thích');
     } catch (err) {
-      const rolledBack = isCurrentlyFav
-        ? [...favorites, targetId]
-        : favorites.filter((favId) => favId !== targetId);
-      setFavorites(rolledBack);
-      localStorage.setItem('fav_recipes', JSON.stringify(rolledBack));
+      setFavorites(favorites);
       console.error(err);
     }
   };
@@ -178,10 +177,7 @@ export default function Home() {
 
     const newItems = (activeRecipe.ingredients || []).map((ing) => {
       if (typeof ing === 'string') {
-        return {
-          dish: activeRecipe.title,
-          text: ing,
-        };
+        return { dish: activeRecipe.title, text: ing };
       }
       return {
         dish: activeRecipe.title,
@@ -193,11 +189,10 @@ export default function Home() {
       const res = await fetch('/api/shopping-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItems),
+        body: JSON.stringify({ items: newItems, userId: user?.id || null }),
       });
 
       if (!res.ok) throw new Error('Không thể thêm vào giỏ');
-
       const addedData = await res.json();
       setShoppingList((prev) => [...prev, ...addedData]);
       alert(`Đã thêm nguyên liệu của món "${activeRecipe.title}" vào giỏ!`);
