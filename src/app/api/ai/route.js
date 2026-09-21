@@ -3,8 +3,6 @@ import { GoogleGenAI, Type } from '@google/genai';
 
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
-
-// Tên model chuẩn theo yêu cầu từ thông báo lỗi của Google AI
 const MODEL_NAME = 'gemini-3.6-flash';
 
 export async function POST(request) {
@@ -18,15 +16,23 @@ export async function POST(request) {
   try {
     const { action, text, imageBase64 } = await request.json();
 
-    // 1. ACTION: Bóc tách và chuẩn hóa nguyên liệu từ văn bản
-    if (action === 'parse-text') {
+    // 1. ACTION: Bóc tách TOÀN BỘ CÔNG THỨC từ văn bản thô (Tên món, thời gian, nguyên liệu, các bước)
+    if (action === 'parse-recipe') {
       if (!text?.trim()) {
         return NextResponse.json({ error: 'Thiếu nội dung văn bản' }, { status: 400 });
       }
 
-      const prompt = `Bạn là chuyên gia ẩm thực Việt Nam. Hãy phân tích danh sách nguyên liệu thô sau đây và chuyển đổi thành danh sách có cấu trúc JSON.
-Chuẩn hóa đơn vị đo lường Việt Nam (ví dụ: 1 lạng = 100g, 1 quả, 1 muỗng/thìa, 1 bó, 1 cây...).
-Văn bản cần phân tích:
+      const prompt = `Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản sau và trích xuất thành một công thức nấu ăn chuẩn xác dạng JSON.
+Yêu cầu:
+- Tên món ăn (title).
+- Mô tả ngắn gọn (desc).
+- Thời gian nấu (cook_time: số phút, ví dụ: 20).
+- Độ khó (difficulty: "Rất dễ", "Dễ", "Trung bình", "Khó").
+- Khẩu phần cơ bản (base_servings: số người, mặc định là 2 nếu không đề cập).
+- Danh sách nguyên liệu (ingredients): tên nguyên liệu (name), định lượng cho 1 người ăn (amountPerPerson), đơn vị tính (unit). Ví dụ: tổng 300g cho 2 người thì amountPerPerson là 150, unit là "g".
+- Các bước thực hiện (steps): danh sách các bước dạng text ngắn gọn, dễ hiểu.
+
+Đoạn văn bản cần phân tích:
 """${text}"""`;
 
       const response = await ai.models.generateContent({
@@ -35,36 +41,49 @@ Văn bản cần phân tích:
         config: {
           responseMimeType: 'application/json',
           responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: 'Tên nguyên liệu chuẩn (VD: Thịt bò, Trứng gà, Cà chua)' },
-                quantity: { type: Type.NUMBER, description: 'Số lượng' },
-                unit: { type: Type.STRING, description: 'Đơn vị tính chuẩn (VD: g, kg, quả, muỗng, tép, bó)' },
-                category: { type: Type.STRING, description: 'Nhóm (thịt, rau_củ, gia_vị, trứng_sữa, hải_sản, khác)' },
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING, description: 'Tên món ăn' },
+              desc: { type: Type.STRING, description: 'Mô tả tóm tắt món ăn' },
+              cook_time: { type: Type.NUMBER, description: 'Thời gian nấu bằng phút' },
+              difficulty: { type: Type.STRING, description: 'Độ khó' },
+              base_servings: { type: Type.NUMBER, description: 'Số người ăn cơ bản' },
+              ingredients: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING, description: 'Tên nguyên liệu' },
+                    amountPerPerson: { type: Type.NUMBER, description: 'Lượng cho 1 người' },
+                    unit: { type: Type.STRING, description: 'Đơn vị tính (g, quả, muỗng, tép...)' },
+                  },
+                  required: ['name', 'amountPerPerson', 'unit'],
+                },
               },
-              required: ['name', 'quantity', 'unit'],
+              steps: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: 'Danh sách các bước nấu'
+              },
             },
+            required: ['title', 'ingredients', 'steps'],
           },
         },
       });
 
-      const parsed = JSON.parse(response.text);
-      return NextResponse.json({ success: true, ingredients: parsed });
+      const parsedData = JSON.parse(response.text);
+      return NextResponse.json({ success: true, data: parsedData });
     }
 
-    // 2. ACTION: Quét ảnh tủ lạnh hoặc hóa đơn siêu thị (Vision)
+    // 2. ACTION: Quét ảnh tủ lạnh hoặc hóa đơn (Vision)
     if (action === 'scan-vision') {
       if (!imageBase64) {
         return NextResponse.json({ error: 'Thiếu dữ liệu ảnh' }, { status: 400 });
       }
 
-      // Xử lý chuỗi base64 loại bỏ prefix data:image/...;base64,
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-
-      const prompt = `Phân tích bức ảnh này (ảnh chụp các ngăn bên trong tủ lạnh hoặc hóa đơn siêu thị thực phẩm).
-Hãy nhận diện tất cả các thực phẩm/nguyên liệu nấu ăn có trong ảnh. Trả về danh sách dạng JSON chuẩn gồm tên thực phẩm, số lượng ước chừng và đơn vị.`;
+      const prompt = `Phân tích bức ảnh này (ảnh chụp tủ lạnh hoặc hóa đơn thực phẩm).
+Nhận diện tất cả các nguyên liệu nấu ăn. Trả về JSON gồm tên thực phẩm, số lượng ước tính và đơn vị.`;
 
       const response = await ai.models.generateContent({
         model: MODEL_NAME,
@@ -84,9 +103,9 @@ Hãy nhận diện tất cả các thực phẩm/nguyên liệu nấu ăn có tr
             items: {
               type: Type.OBJECT,
               properties: {
-                name: { type: Type.STRING, description: 'Tên thực phẩm phát hiện được' },
-                quantity: { type: Type.NUMBER, description: 'Số lượng ước tính hoặc ghi trên hóa đơn' },
-                unit: { type: Type.STRING, description: 'Đơn vị (quả, khay, túi, gói, g, kg...)' },
+                name: { type: Type.STRING, description: 'Tên thực phẩm' },
+                quantity: { type: Type.NUMBER, description: 'Số lượng' },
+                unit: { type: Type.STRING, description: 'Đơn vị' },
               },
               required: ['name'],
             },

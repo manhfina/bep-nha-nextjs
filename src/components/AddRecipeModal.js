@@ -1,201 +1,230 @@
 'use client';
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
 
 export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [previewImage, setPreviewImage] = useState('');
-  const [useCustomUrl, setUseCustomUrl] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    cook_time: 15,
-    difficulty: 'Dễ',
-    image_url: '',
-    ingredients: '',
-    instructions: '',
-  });
+  const [title, setTitle] = useState('');
+  const [desc, setDesc] = useState('');
+  const [cookTime, setCookTime] = useState(20);
+  const [difficulty, setDifficulty] = useState('Dễ');
+  const [baseServings, setBaseServings] = useState(2);
+  const [imageUrl, setImageUrl] = useState('');
+  const [ingredients, setIngredients] = useState([
+    { name: '', amountPerPerson: 100, unit: 'g' },
+  ]);
+  const [steps, setSteps] = useState(['']);
+  
+  // Trạng thái cho tính năng AI Auto-Fill
+  const [rawText, setRawText] = useState('');
+  const [showAiInput, setShowAiInput] = useState(false);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  // Tải ảnh trực tiếp lên Supabase Storage
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Giới hạn dung lượng tối đa 5MB
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Vui lòng chọn ảnh có dung lượng dưới 5MB!');
+  // Xử lý AI phân tích và điền tự động
+  const handleAiParse = async () => {
+    if (!rawText.trim()) {
+      alert('Vui lòng dán văn bản công thức cần phân tích!');
       return;
     }
 
-    setPreviewImage(URL.createObjectURL(file));
-    setUploading(true);
-
+    setIsAiLoading(true);
     try {
-      const ext = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${ext}`;
-      const filePath = `images/${fileName}`;
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'parse-recipe',
+          text: rawText,
+        }),
+      });
 
-      const { error: uploadError } = await supabase.storage
-        .from('recipes')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Lỗi bóc tách công thức');
 
-      if (uploadError) {
-        throw new Error(uploadError.message);
+      const { data } = result;
+      if (data.title) setTitle(data.title);
+      if (data.desc) setDesc(data.desc);
+      if (data.cook_time) setCookTime(data.cook_time);
+      if (data.difficulty) setDifficulty(data.difficulty);
+      if (data.base_servings) setBaseServings(data.base_servings);
+
+      if (Array.isArray(data.ingredients) && data.ingredients.length > 0) {
+        setIngredients(
+          data.ingredients.map((ing) => ({
+            name: ing.name || '',
+            amountPerPerson: ing.amountPerPerson || 1,
+            unit: ing.unit || 'phần',
+          }))
+        );
       }
 
-      const { data: publicData } = supabase.storage
-        .from('recipes')
-        .getPublicUrl(filePath);
+      if (Array.isArray(data.steps) && data.steps.length > 0) {
+        setSteps(data.steps);
+      }
 
-      setFormData((prev) => ({ ...prev, image_url: publicData.publicUrl }));
+      setShowAiInput(false);
+      setRawText('');
+      alert('✨ AI đã điền tự động thành công! Bạn có thể xem lại và tinh chỉnh trước khi lưu.');
     } catch (err) {
-      alert('Lỗi tải ảnh lên Supabase: ' + err.message);
-      setPreviewImage('');
+      alert('Lỗi AI: ' + err.message);
     } finally {
-      setUploading(false);
+      setIsAiLoading(false);
     }
   };
 
-  const handleRemoveImage = () => {
-    setPreviewImage('');
-    setFormData((prev) => ({ ...prev, image_url: '' }));
+  // Quản lý danh sách nguyên liệu
+  const handleIngredientChange = (index, field, value) => {
+    const updated = [...ingredients];
+    updated[index][field] = value;
+    setIngredients(updated);
   };
 
+  const addIngredientRow = () => {
+    setIngredients([...ingredients, { name: '', amountPerPerson: 50, unit: 'g' }]);
+  };
+
+  const removeIngredientRow = (index) => {
+    if (ingredients.length === 1) return;
+    setIngredients(ingredients.filter((_, idx) => idx !== index));
+  };
+
+  // Quản lý các bước
+  const handleStepChange = (index, value) => {
+    const updated = [...steps];
+    updated[index] = value;
+    setSteps(updated);
+  };
+
+  const addStepRow = () => {
+    setSteps([...steps, '']);
+  };
+
+  const removeStepRow = (index) => {
+    if (steps.length === 1) return;
+    setSteps(steps.filter((_, idx) => idx !== index));
+  };
+
+  // Submit lưu công thức
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    if (!title.trim()) {
+      alert('Vui lòng nhập tên món ăn!');
+      return;
+    }
 
+    const validIngredients = ingredients.filter((item) => item.name.trim() !== '');
+    const validSteps = steps.filter((step) => step.trim() !== '');
+
+    setSubmitting(true);
     try {
-      // Chuẩn hóa nguyên liệu thành mảng Object phù hợp tính năng đổi khẩu phần
-      const ingredientsArray = formData.ingredients
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map((line) => ({
-          name: line,
-          amountPerPerson: 1,
-          unit: '',
-        }));
-
-      // Chuẩn hóa các bước nấu thành mảng chuỗi
-      const instructionsArray = formData.instructions
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean);
-
-      // Map dữ liệu với cấu trúc bảng recipes
-      const payload = {
-        title: formData.title,
-        desc: formData.description,
-        time: `${formData.cook_time} phút`,
-        difficulty: formData.difficulty,
-        image:
-          formData.image_url ||
-          previewImage ||
-          'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
-        base_servings: 2,
-        ingredients: ingredientsArray,
-        steps: instructionsArray,
-      };
-
       const res = await fetch('/api/recipes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          title,
+          desc,
+          cook_time: Number(cookTime),
+          difficulty,
+          base_servings: Number(baseServings),
+          image_url: imageUrl.trim() || 'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
+          ingredients: validIngredients,
+          steps: validSteps,
+        }),
       });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Lỗi khi lưu món ăn');
-      }
 
       const newRecipe = await res.json();
-      onRecipeAdded(newRecipe);
-      onClose();
+      if (!res.ok) throw new Error(newRecipe.error || 'Lỗi lưu công thức');
 
-      // Reset form sau khi thêm thành công
-      setFormData({
-        title: '',
-        description: '',
-        cook_time: 15,
-        difficulty: 'Dễ',
-        image_url: '',
-        ingredients: '',
-        instructions: '',
-      });
-      setPreviewImage('');
-      alert('Đã thêm món mới thành công!');
+      if (onRecipeAdded) onRecipeAdded(newRecipe);
+      onClose();
+      alert('Đã thêm món ăn mới vào sổ tay thành công!');
     } catch (err) {
-      alert('Không thể tạo công thức: ' + err.message);
+      alert('Lỗi: ' + err.message);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
   return (
-    <div style={modalStyles.overlay}>
-      <div style={modalStyles.modal}>
-        <button onClick={onClose} style={modalStyles.closeBtn}>
-          ✕
-        </button>
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} style={styles.closeBtn}>✕</button>
 
-        <h2 style={modalStyles.title}>🍳 Đăng công thức mới</h2>
+        <div style={{ textAlign: 'center', marginBottom: '14px' }}>
+          <h2 style={styles.title}>🍳 Đăng công thức mới</h2>
+          <p style={{ color: '#666', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
+            Nhập tay hoặc dùng AI tự động điền từ bài viết trên mạng
+          </p>
+        </div>
 
-        <form onSubmit={handleSubmit} style={modalStyles.form}>
-          <div style={modalStyles.formGroup}>
-            <label style={modalStyles.label}>Tên món ăn *</label>
+        {/* Khung trợ lý AI Auto-Fill */}
+        <div style={styles.aiBox}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontWeight: '700', fontSize: '0.88rem', color: '#8e44ad', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              🤖 AI Trợ Lý Nhập Liệu
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowAiInput(!showAiInput)}
+              style={styles.btnToggleAi}
+            >
+              {showAiInput ? 'Đóng khung AI' : '✨ Dán công thức thô vào đây'}
+            </button>
+          </div>
+
+          {showAiInput && (
+            <div style={{ marginTop: '10px' }}>
+              <textarea
+                rows="4"
+                placeholder="Dán bài viết hoặc ghi chú nguyên liệu vào đây... (Ví dụ: Món sườn xào chua ngọt cần 500g sườn thăn, 2 quả cà chua, tỏi ớt băm... Bước 1 chặt sườn luộc sơ, Bước 2 pha nước sốt...)"
+                value={rawText}
+                onChange={(e) => setRawText(e.target.value)}
+                style={styles.aiTextarea}
+              />
+              <button
+                type="button"
+                onClick={handleAiParse}
+                disabled={isAiLoading}
+                style={styles.btnAiAction}
+              >
+                {isAiLoading ? '⏳ Gemini AI đang bóc tách...' : '⚡ Bóc tách & Điền form tự động'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Form nhập liệu chính */}
+        <form onSubmit={handleSubmit} style={styles.formContent}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Tên món ăn (*):</label>
             <input
               type="text"
-              name="title"
               required
-              value={formData.title}
-              onChange={handleChange}
-              placeholder="VD: Cà tím rim mắm tỏi"
-              style={modalStyles.input}
+              placeholder="VD: Thịt kho tàu nước dừa"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              style={styles.input}
             />
           </div>
 
-          <div style={modalStyles.formGroup}>
-            <label style={modalStyles.label}>Mô tả ngắn</label>
-            <input
-              type="text"
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              placeholder="VD: Món này làm siêu nhanh, nguyên liệu rẻ tiền mà tốn cơm..."
-              style={modalStyles.input}
-            />
-          </div>
-
-          <div style={modalStyles.row}>
+          <div style={styles.row}>
             <div style={{ flex: 1 }}>
-              <label style={modalStyles.label}>Thời gian nấu (phút)</label>
+              <label style={styles.label}>Thời gian (phút):</label>
               <input
                 type="number"
-                name="cook_time"
-                value={formData.cook_time}
-                onChange={handleChange}
-                style={modalStyles.input}
+                min="1"
+                value={cookTime}
+                onChange={(e) => setCookTime(e.target.value)}
+                style={styles.input}
               />
             </div>
             <div style={{ flex: 1 }}>
-              <label style={modalStyles.label}>Độ khó</label>
+              <label style={styles.label}>Độ khó:</label>
               <select
-                name="difficulty"
-                value={formData.difficulty}
-                onChange={handleChange}
-                style={modalStyles.input}
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value)}
+                style={styles.input}
               >
                 <option value="Rất dễ">Rất dễ</option>
                 <option value="Dễ">Dễ</option>
@@ -203,121 +232,122 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
                 <option value="Khó">Khó</option>
               </select>
             </div>
+            <div style={{ flex: 1 }}>
+              <label style={styles.label}>Khẩu phần (người):</label>
+              <input
+                type="number"
+                min="1"
+                value={baseServings}
+                onChange={(e) => setBaseServings(e.target.value)}
+                style={styles.input}
+              />
+            </div>
           </div>
 
-          {/* Khu vực Upload / Nhập link ảnh */}
-          <div style={modalStyles.formGroup}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={modalStyles.label}>Hình ảnh món ăn</label>
-              <button
-                type="button"
-                onClick={() => setUseCustomUrl(!useCustomUrl)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#e67e22',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                }}
-              >
-                {useCustomUrl ? 'Tải ảnh từ máy' : 'Dán link ảnh có sẵn'}
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Mô tả món ăn:</label>
+            <input
+              type="text"
+              placeholder="Mô tả hương vị, nguồn gốc món ăn..."
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              style={styles.input}
+            />
+          </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Link ảnh món ăn:</label>
+            <input
+              type="url"
+              placeholder="https://images.unsplash.com/..."
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              style={styles.input}
+            />
+          </div>
+
+          {/* Danh sách nguyên liệu */}
+          <div style={{ marginTop: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <label style={{ ...styles.label, margin: 0 }}>Nguyên liệu (cho 1 người ăn):</label>
+              <button type="button" onClick={addIngredientRow} style={styles.btnAddMini}>
+                + Thêm dòng
               </button>
             </div>
 
-            {useCustomUrl ? (
-              <input
-                type="url"
-                name="image_url"
-                value={formData.image_url}
-                onChange={(e) => {
-                  handleChange(e);
-                  setPreviewImage(e.target.value);
-                }}
-                placeholder="https://images.unsplash.com/..."
-                style={modalStyles.input}
-              />
-            ) : (
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleFileChange}
-                style={{ ...modalStyles.input, padding: '8px' }}
-              />
-            )}
-
-            {uploading && (
-              <span style={{ fontSize: '0.8rem', color: '#e67e22', fontWeight: 'bold' }}>
-                ⏳ Đang tải ảnh lên Supabase Storage...
-              </span>
-            )}
-
-            {previewImage && (
-              <div style={{ marginTop: '8px', position: 'relative' }}>
-                <img
-                  src={previewImage}
-                  alt="Xem trước ảnh"
-                  style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '10px' }}
+            {ingredients.map((item, idx) => (
+              <div key={idx} style={styles.ingredientRow}>
+                <input
+                  type="text"
+                  placeholder="Tên nguyên liệu (VD: Thịt bò)"
+                  value={item.name}
+                  onChange={(e) => handleIngredientChange(idx, 'name', e.target.value)}
+                  style={{ flex: 3, ...styles.input }}
                 />
-                <button
-                  type="button"
-                  onClick={handleRemoveImage}
-                  style={{
-                    position: 'absolute',
-                    top: '8px',
-                    right: '8px',
-                    background: 'rgba(0,0,0,0.65)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '50%',
-                    width: '26px',
-                    height: '26px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  ✕
-                </button>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Lượng"
+                  value={item.amountPerPerson}
+                  onChange={(e) => handleIngredientChange(idx, 'amountPerPerson', parseFloat(e.target.value) || 0)}
+                  style={{ flex: 1.2, ...styles.input }}
+                />
+                <input
+                  type="text"
+                  placeholder="Đơn vị (g, quả..)"
+                  value={item.unit}
+                  onChange={(e) => handleIngredientChange(idx, 'unit', e.target.value)}
+                  style={{ flex: 1.5, ...styles.input }}
+                />
+                {ingredients.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeIngredientRow(idx)}
+                    style={styles.btnRemoveRow}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
-            )}
+            ))}
           </div>
 
-          <div style={modalStyles.formGroup}>
-            <label style={modalStyles.label}>Nguyên liệu (mỗi dòng 1 loại)</label>
-            <textarea
-              name="ingredients"
-              rows={3}
-              value={formData.ingredients}
-              onChange={handleChange}
-              placeholder="1 trái ớt cay&#10;2 thìa nước mắm&#10;1 thìa đường"
-              style={modalStyles.textarea}
-            />
+          {/* Các bước nấu */}
+          <div style={{ marginTop: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <label style={{ ...styles.label, margin: 0 }}>Các bước thực hiện:</label>
+              <button type="button" onClick={addStepRow} style={styles.btnAddMini}>
+                + Thêm bước
+              </button>
+            </div>
+
+            {steps.map((step, idx) => (
+              <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                <span style={styles.stepIndex}>{idx + 1}</span>
+                <input
+                  type="text"
+                  placeholder={`Bước ${idx + 1}...`}
+                  value={step}
+                  onChange={(e) => handleStepChange(idx, e.target.value)}
+                  style={{ flex: 1, ...styles.input }}
+                />
+                {steps.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeStepRow(idx)}
+                    style={styles.btnRemoveRow}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
 
-          <div style={modalStyles.formGroup}>
-            <label style={modalStyles.label}>Các bước nấu (mỗi dòng 1 bước)</label>
-            <textarea
-              name="instructions"
-              rows={3}
-              value={formData.instructions}
-              onChange={handleChange}
-              placeholder="Bước 1: Cà tím chẻ dọc, cắt miếng vừa ăn...&#10;Bước 2: Rán áp chảo vàng 2 mặt...&#10;Bước 3: Rưới nước mắm tỏi ớt vào rim..."
-              style={modalStyles.textarea}
-            />
-          </div>
-
-          <div style={modalStyles.actions}>
-            <button type="button" onClick={onClose} style={modalStyles.btnCancel}>
-              Hủy
-            </button>
-            <button
-              type="submit"
-              disabled={loading || uploading}
-              style={{
-                ...modalStyles.btnSubmit,
-                opacity: loading || uploading ? 0.6 : 1,
-              }}
-            >
-              {loading ? 'Đang lưu...' : uploading ? 'Chờ tải ảnh...' : 'Lưu công thức'}
+          {/* Nút lưu hoàn tất */}
+          <div style={{ marginTop: '20px' }}>
+            <button type="submit" disabled={submitting} style={styles.btnSubmit}>
+              {submitting ? 'Đang lưu vào Supabase...' : '💾 Lưu công thức món ăn'}
             </button>
           </div>
         </form>
@@ -326,116 +356,153 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
   );
 }
 
-const modalStyles = {
+const styles = {
   overlay: {
     position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 9999,
-    padding: '20px',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 10001,
+    padding: '16px',
   },
   modal: {
     backgroundColor: '#fff',
-    borderRadius: '20px',
-    maxWidth: '540px',
+    borderRadius: '24px',
+    maxWidth: '560px',
     width: '100%',
-    maxHeight: '88vh',
-    overflowY: 'auto',
-    padding: '28px',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
+    maxHeight: '90vh',
+    display: 'flex',
+    flexDirection: 'column',
+    padding: '24px',
+    boxShadow: '0 25px 50px rgba(0,0,0,0.3)',
     position: 'relative',
     boxSizing: 'border-box',
-    fontFamily: 'inherit',
+    textAlign: 'left',
   },
   closeBtn: {
     position: 'absolute',
-    top: '18px',
-    right: '20px',
-    background: '#f1f2f6',
-    border: 'none',
-    borderRadius: '50%',
-    width: '32px',
-    height: '32px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    color: '#666',
+    top: '16px', right: '16px',
+    background: '#f1f2f6', border: 'none',
+    borderRadius: '50%', width: '32px', height: '32px',
+    cursor: 'pointer', fontWeight: 'bold', color: '#666',
   },
   title: {
-    margin: '0 0 20px 0',
-    fontSize: '1.4rem',
-    color: '#2d3436',
+    margin: 0, fontSize: '1.35rem', fontWeight: '700', color: '#2d3436',
+  },
+  aiBox: {
+    backgroundColor: '#fbf7ff',
+    border: '1px solid #e8d7ff',
+    borderRadius: '16px',
+    padding: '12px 14px',
+    marginBottom: '14px',
+  },
+  btnToggleAi: {
+    background: '#8e44ad',
+    color: '#fff',
+    border: 'none',
+    padding: '6px 12px',
+    borderRadius: '8px',
+    fontSize: '0.78rem',
     fontWeight: '700',
+    cursor: 'pointer',
   },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '14px',
-  },
-  formGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    textAlign: 'left',
-  },
-  row: {
-    display: 'flex',
-    gap: '12px',
-    textAlign: 'left',
-  },
-  label: {
+  aiTextarea: {
+    width: '100%',
+    padding: '10px',
+    borderRadius: '10px',
+    border: '1px solid #dcd0ea',
     fontSize: '0.85rem',
-    fontWeight: '600',
-    color: '#4b5563',
-  },
-  input: {
-    width: '100%',
-    padding: '10px 12px',
-    borderRadius: '10px',
-    border: '1px solid #dcdde1',
-    fontSize: '0.9rem',
-    outline: 'none',
-    boxSizing: 'border-box',
-  },
-  textarea: {
-    width: '100%',
-    padding: '10px 12px',
-    borderRadius: '10px',
-    border: '1px solid #dcdde1',
-    fontSize: '0.9rem',
     outline: 'none',
     boxSizing: 'border-box',
     resize: 'vertical',
   },
-  actions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '10px',
-    marginTop: '10px',
-    paddingTop: '15px',
-    borderTop: '1px solid #eee',
-  },
-  btnCancel: {
-    padding: '10px 18px',
+  btnAiAction: {
+    width: '100%',
+    marginTop: '8px',
+    backgroundColor: '#8e44ad',
+    color: '#fff',
+    border: 'none',
+    padding: '10px',
     borderRadius: '10px',
-    border: '1px solid #ccc',
-    background: '#f8f9fa',
+    fontWeight: '700',
+    fontSize: '0.85rem',
     cursor: 'pointer',
-    fontWeight: '600',
-    color: '#555',
+  },
+  formContent: {
+    overflowY: 'auto',
+    flex: 1,
+    paddingRight: '4px',
+  },
+  formGroup: {
+    marginBottom: '10px',
+  },
+  row: {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '10px',
+  },
+  label: {
+    display: 'block',
+    fontSize: '0.82rem',
+    fontWeight: '700',
+    color: '#4a5568',
+    marginBottom: '4px',
+  },
+  input: {
+    width: '100%',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    border: '1px solid #dcdde1',
+    fontSize: '0.85rem',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  btnAddMini: {
+    background: '#e8f5e9',
+    color: '#2e7d32',
+    border: '1px solid #c8e6c9',
+    padding: '4px 8px',
+    borderRadius: '6px',
+    fontSize: '0.75rem',
+    fontWeight: '700',
+    cursor: 'pointer',
+  },
+  ingredientRow: {
+    display: 'flex',
+    gap: '6px',
+    marginBottom: '8px',
+    alignItems: 'center',
+  },
+  stepIndex: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    backgroundColor: '#e67e22',
+    color: '#fff',
+    fontSize: '0.75rem',
+    fontWeight: 'bold',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  btnRemoveRow: {
+    background: 'none',
+    border: 'none',
+    color: '#e74c3c',
+    fontSize: '0.9rem',
+    cursor: 'pointer',
+    padding: '0 4px',
   },
   btnSubmit: {
-    padding: '10px 22px',
-    borderRadius: '10px',
-    border: 'none',
-    background: '#27ae60',
+    width: '100%',
+    backgroundColor: '#27ae60',
     color: '#fff',
+    border: 'none',
+    padding: '12px',
+    borderRadius: '12px',
     fontWeight: '700',
+    fontSize: '0.92rem',
     cursor: 'pointer',
   },
 };
