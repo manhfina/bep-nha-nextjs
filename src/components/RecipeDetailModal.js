@@ -18,6 +18,7 @@ export default function RecipeDetailModal({
   const [newRating, setNewRating] = useState(5);
   const [newNote, setNewNote] = useState('');
   const [submittingNote, setSubmittingNote] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
 
   // Tải danh sách ghi chú khi mở modal hoặc chuyển sang tab ghi chú
   const fetchNotes = async () => {
@@ -303,6 +304,14 @@ export default function RecipeDetailModal({
           <button onClick={onAddToCart} style={styles.btnCart}>
             🛒 Thêm vào giỏ
           </button>
+          {/* NÚT CHIA SẺ MỚI THÊM VÀO ĐÂY */}
+          <button 
+            onClick={() => setIsShareOpen(true)} 
+            style={styles.btnShareMini} 
+            title="Chia sẻ mã QR / Link"
+          >
+            📤
+          </button>
           {onEdit && (
             <button onClick={() => onEdit(recipe)} style={styles.btnEdit}>
               ✏️ Sửa
@@ -477,6 +486,19 @@ const styles = {
     flex: 2, backgroundColor: '#e67e22', color: '#fff',
     border: 'none', padding: '11px', borderRadius: '12px',
     fontWeight: '700', fontSize: '0.9rem', cursor: 'pointer',
+  },
+  // THÊM ĐOẠN NÀY:
+  btnShareMini: {
+    backgroundColor: '#3498db',
+    color: '#fff',
+    border: 'none',
+    padding: '11px 15px',
+    borderRadius: '12px',
+    fontSize: '1rem',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   btnEdit: {
     flex: 1, backgroundColor: '#f1f2f6', color: '#2d3436',
