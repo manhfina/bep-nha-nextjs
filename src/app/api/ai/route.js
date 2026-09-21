@@ -4,6 +4,9 @@ import { GoogleGenAI, Type } from '@google/genai';
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
+// Tên model chuẩn theo yêu cầu từ thông báo lỗi của Google AI
+const MODEL_NAME = 'gemini-3.6-flash';
+
 export async function POST(request) {
   if (!ai) {
     return NextResponse.json(
@@ -15,7 +18,7 @@ export async function POST(request) {
   try {
     const { action, text, imageBase64 } = await request.json();
 
-    // 1. ACTION: Bóc tách và chuẩn hóa nguyên liệu từ văn bản thô
+    // 1. ACTION: Bóc tách và chuẩn hóa nguyên liệu từ văn bản
     if (action === 'parse-text') {
       if (!text?.trim()) {
         return NextResponse.json({ error: 'Thiếu nội dung văn bản' }, { status: 400 });
@@ -27,7 +30,7 @@ Văn bản cần phân tích:
 """${text}"""`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: MODEL_NAME,
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -60,11 +63,11 @@ Văn bản cần phân tích:
       // Xử lý chuỗi base64 loại bỏ prefix data:image/...;base64,
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-      const prompt = `Phân tích bức ảnh này (đây là ảnh chụp các ngăn bên trong tủ lạnh hoặc hóa đơn siêu thị thực phẩm).
+      const prompt = `Phân tích bức ảnh này (ảnh chụp các ngăn bên trong tủ lạnh hoặc hóa đơn siêu thị thực phẩm).
 Hãy nhận diện tất cả các thực phẩm/nguyên liệu nấu ăn có trong ảnh. Trả về danh sách dạng JSON chuẩn gồm tên thực phẩm, số lượng ước chừng và đơn vị.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: MODEL_NAME,
         contents: [
           {
             inlineData: {
