@@ -7,19 +7,18 @@ const detectMinutes = (text = '') => {
   return match ? parseInt(match[1], 10) : null;
 };
 
-// Phát chuông báo bằng Web Audio API không cần tải file ngoài
+// Phát chuông báo bằng Web Audio API
 const playAlarmSound = () => {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
     const ctx = new AudioContext();
     
-    // Tạo 3 tiếng bíp liên tiếp
     [0, 0.25, 0.5].forEach((delay) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.value = 880; // Nốt La (A5)
+      osc.frequency.value = 880;
       gain.gain.setValueAtTime(0.2, ctx.currentTime + delay);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.2);
       osc.connect(gain);
@@ -42,12 +41,52 @@ export default function CookModeModal({
   const steps = recipe?.steps || [];
   const currentStepText = steps[step] || '';
 
-  // Quản lý đồng hồ
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
+  const [isWakeLocked, setIsWakeLocked] = useState(false);
   const timerRef = useRef(null);
+  const wakeLockRef = useRef(null);
 
-  // Khi chuyển bước nấu, tự nhận diện thời gian gợi ý cho bước đó
+  // 1. Quản lý Screen Wake Lock (Giữ màn hình luôn sáng khi mở Cook Mode)
+  useEffect(() => {
+    let isMounted = true;
+
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator && recipe) {
+        try {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+          if (isMounted) setIsWakeLocked(true);
+
+          wakeLockRef.current.addEventListener('release', () => {
+            if (isMounted) setIsWakeLocked(false);
+          });
+        } catch (err) {
+          console.warn('Không thể bật Wake Lock:', err.message);
+        }
+      }
+    };
+
+    // Khi người dùng chuyển tab và quay lại, tự xin lại quyền Wake Lock
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && recipe) {
+        requestWakeLock();
+      }
+    };
+
+    requestWakeLock();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [recipe]);
+
+  // 2. Nhận diện phút nấu theo từng bước
   useEffect(() => {
     clearInterval(timerRef.current);
     setIsRunning(false);
@@ -62,7 +101,7 @@ export default function CookModeModal({
     return () => clearInterval(timerRef.current);
   }, [step, currentStepText]);
 
-  // Bộ đếm thời gian
+  // 3. Đếm ngược thời gian
   useEffect(() => {
     if (isRunning && secondsLeft > 0) {
       timerRef.current = setInterval(() => {
@@ -87,7 +126,6 @@ export default function CookModeModal({
 
   if (!recipe) return null;
 
-  // Định dạng mm:ss
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -107,7 +145,14 @@ export default function CookModeModal({
         {/* Header */}
         <div style={styles.header}>
           <div>
-            <span style={styles.subTitle}>Chế độ nấu ăn tập trung</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={styles.subTitle}>Chế độ nấu tập trung</span>
+              {isWakeLocked && (
+                <span style={styles.wakeLockBadge} title="Màn hình sẽ không tự khóa khi đang nấu">
+                  💡 Giữ sáng ON
+                </span>
+              )}
+            </div>
             <h2 style={styles.recipeTitle}>{recipe.title}</h2>
           </div>
           <button onClick={onClose} style={styles.closeBtn}>✕ Thoát</button>
@@ -141,7 +186,7 @@ export default function CookModeModal({
             ) : (
               <button
                 onClick={() => {
-                  if (secondsLeft === 0) setSecondsLeft(180); // Mặc định 3 phút nếu đang là 0
+                  if (secondsLeft === 0) setSecondsLeft(180);
                   setIsRunning(true);
                 }}
                 style={styles.btnStart}
@@ -237,6 +282,15 @@ const styles = {
     textTransform: 'uppercase',
     letterSpacing: '1px',
     fontWeight: '600',
+  },
+  wakeLockBadge: {
+    fontSize: '0.7rem',
+    backgroundColor: '#2ed57322',
+    color: '#2ed573',
+    padding: '2px 8px',
+    borderRadius: '6px',
+    fontWeight: '600',
+    border: '1px solid #2ed57355',
   },
   recipeTitle: {
     margin: '4px 0 0 0',
