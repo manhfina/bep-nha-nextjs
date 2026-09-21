@@ -1,132 +1,313 @@
 'use client';
+import { useState, useEffect } from 'react';
 
 export default function RecipeDetailModal({
   recipe,
-  servings,
+  servings = 2,
   onClose,
   onChangeServings,
   onAddToCart,
-  onStartCook,
   onEdit,
+  onStartCook,
+  currentUser,
+  currentKitchen,
 }) {
+  const [activeTab, setActiveTab] = useState('recipe'); // 'recipe' hoặc 'notes'
+  const [notes, setNotes] = useState([]);
+  const [loadingNotes, setLoadingNotes] = useState(false);
+  const [newRating, setNewRating] = useState(5);
+  const [newNote, setNewNote] = useState('');
+  const [submittingNote, setSubmittingNote] = useState(false);
+
+  // Tải danh sách ghi chú khi mở modal hoặc chuyển sang tab ghi chú
+  const fetchNotes = async () => {
+    if (!recipe?.id) return;
+    setLoadingNotes(true);
+    try {
+      const kitchenParam = currentKitchen?.id ? `&kitchenId=${currentKitchen.id}` : '';
+      const res = await fetch(`/api/recipe-notes?recipeId=${recipe.id}${kitchenParam}`);
+      const data = await res.json();
+      if (Array.isArray(data)) setNotes(data);
+    } catch (err) {
+      console.error('Lỗi tải ghi chú:', err);
+    } finally {
+      setLoadingNotes(false);
+    }
+  };
+
+  useEffect(() => {
+    if (recipe?.id) {
+      fetchNotes();
+      setActiveTab('recipe');
+      setNewNote('');
+      setNewRating(5);
+    }
+  }, [recipe?.id]);
+
   if (!recipe) return null;
 
-  const base = recipe.baseServings || 2;
-  const ratio = servings / base;
+  // Xử lý gửi đánh giá & mẹo nấu
+  const handleAddNote = async (e) => {
+    e.preventDefault();
+    if (!newNote.trim()) return;
+
+    setSubmittingNote(true);
+    try {
+      const userIdentifier = currentUser?.email?.includes('@phone.bepnha.com')
+        ? currentUser.email.replace('@phone.bepnha.com', '')
+        : currentUser?.email?.split('@')[0] || 'Khách';
+
+      const res = await fetch('/api/recipe-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipeId: recipe.id,
+          kitchenId: currentKitchen?.id || null,
+          userId: currentUser?.id || null,
+          userIdentifier,
+          rating: newRating,
+          note: newNote,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Không thể lưu ghi chú');
+
+      setNotes((prev) => [data, ...prev]);
+      setNewNote('');
+      setNewRating(5);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSubmittingNote(false);
+    }
+  };
+
+  // Xử lý xóa ghi chú
+  const handleDeleteNote = async (noteId) => {
+    if (!confirm('Bạn có chắc muốn xóa ghi chú này?')) return;
+    try {
+      const res = await fetch(`/api/recipe-notes?id=${noteId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Không thể xóa');
+      setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // Tính điểm đánh giá trung bình
+  const avgRating =
+    notes.length > 0
+      ? (notes.reduce((sum, n) => sum + (n.rating || 5), 0) / notes.length).toFixed(1)
+      : null;
 
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-        {/* Nút đóng */}
-        <button onClick={onClose} style={styles.closeBtn}>
-          ✕
-        </button>
-        {/* Nút sửa ✏️ (nằm lùi sang trái một chút, right: 58px) */}
-        {onEdit && (
-          <button
-            onClick={() => onEdit(recipe)}
-            style={{ ...styles.closeBtn, right: '58px', fontSize: '0.9rem' }}
-            title="Chỉnh sửa công thức"
-          >
-            ✏️
-          </button>
-        )}
-        {/* Khung ảnh */}
+        <button onClick={onClose} style={styles.closeBtn}>✕</button>
+
+        {/* Ảnh và tiêu đề món */}
         <div style={styles.imageContainer}>
           <img src={recipe.image} alt={recipe.title} style={styles.image} />
-          <div style={styles.imageOverlay} />
           <div style={styles.headerInfo}>
-            <span style={styles.badge}>{recipe.difficulty}</span>
             <h2 style={styles.title}>{recipe.title}</h2>
-            <p style={styles.time}>⏱️ {recipe.time}</p>
+            <div style={styles.metaRow}>
+              <span>⏱️ {recipe.time}</span>
+              <span>🔥 {recipe.difficulty || 'Dễ'}</span>
+              {avgRating && (
+                <span style={styles.avgBadge}>
+                  ⭐ {avgRating} ({notes.length})
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Nội dung chi tiết */}
-        <div style={styles.body}>
-          {recipe.desc && <p style={styles.desc}>{recipe.desc}</p>}
+        {/* Thanh chọn Tab: Hướng dẫn nấu vs Nhật ký & Ghi chú */}
+        <div style={styles.tabsContainer}>
+          <button
+            onClick={() => setActiveTab('recipe')}
+            style={{
+              ...styles.tabBtn,
+              ...(activeTab === 'recipe' ? styles.tabActive : {}),
+            }}
+          >
+            📖 Công thức & Các bước
+          </button>
+          <button
+            onClick={() => setActiveTab('notes')}
+            style={{
+              ...styles.tabBtn,
+              ...(activeTab === 'notes' ? styles.tabActive : {}),
+            }}
+          >
+            ⭐ Mẹo & Đánh giá ({notes.length})
+          </button>
+        </div>
 
-          {/* Điều chỉnh khẩu phần */}
-          <div style={styles.servingsBar}>
-            <div>
-              <span style={styles.servingsTitle}>Khẩu phần ăn</span>
-              <p style={styles.servingsSub}>Định lượng tự động cân chỉnh</p>
-            </div>
-            <div style={styles.counter}>
-              <button
-                onClick={() => onChangeServings(Math.max(1, servings - 1))}
-                style={styles.btnCount}
-              >
-                -
-              </button>
-              <span style={styles.countText}>{servings} người</span>
-              <button
-                onClick={() => onChangeServings(servings + 1)}
-                style={styles.btnCount}
-              >
-                +
-              </button>
-            </div>
-          </div>
-
-          {/* Nguyên liệu */}
-          <div>
-            <div style={styles.sectionHeader}>
-              <h3 style={styles.sectionTitle}>🛒 Nguyên liệu chuẩn bị</h3>
-              <button onClick={onAddToCart} style={styles.btnAddCart}>
-                + Thêm vào giỏ
-              </button>
-            </div>
-
-            <div style={styles.ingredientGrid}>
-              {(recipe.ingredients || []).map((ing, idx) => {
-                if (typeof ing === 'string') {
-                  return (
-                    <div key={idx} style={styles.ingredientCard}>
-                      <span style={styles.dot}>•</span>
-                      <span>{ing}</span>
-                    </div>
-                  );
-                }
-
-                const calculatedAmount = ing.amountPerPerson
-                  ? Math.round(ing.amountPerPerson * servings * 10) / 10
-                  : ing.amount
-                  ? Math.round(ing.amount * ratio * 10) / 10
-                  : null;
-
-                return (
-                  <div key={idx} style={styles.ingredientCard}>
-                    <span>{ing.name}</span>
-                    <strong>
-                      {calculatedAmount ? `${calculatedAmount} ` : ''}
-                      {ing.unit || ''}
-                    </strong>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Các bước nấu */}
-          <div>
-            <h3 style={styles.sectionTitle}>📝 Các bước thực hiện</h3>
-            <div style={styles.stepsList}>
-              {(recipe.steps || []).map((step, idx) => (
-                <div key={idx} style={styles.stepItem}>
-                  <span style={styles.stepNumber}>{idx + 1}</span>
-                  <span style={styles.stepText}>{step}</span>
+        {/* Nội dung theo Tab */}
+        <div style={styles.bodyContent}>
+          {activeTab === 'recipe' ? (
+            <>
+              {/* Chọn khẩu phần */}
+              <div style={styles.servingsCard}>
+                <span style={{ fontSize: '0.9rem', fontWeight: '600', color: '#2d3436' }}>
+                  Khẩu phần ăn:
+                </span>
+                <div style={styles.servingsControls}>
+                  <button
+                    onClick={() => onChangeServings(Math.max(1, servings - 1))}
+                    style={styles.servingsBtn}
+                  >
+                    -
+                  </button>
+                  <span style={styles.servingsValue}>{servings} người</span>
+                  <button
+                    onClick={() => onChangeServings(servings + 1)}
+                    style={styles.servingsBtn}
+                  >
+                    +
+                  </button>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          {/* Nút hành động */}
-          <div style={styles.footer}>
-            <button onClick={onStartCook} style={styles.btnCook}>
-              🔥 Bắt đầu nấu (Cook Mode)
+              {/* Nguyên liệu */}
+              <h3 style={styles.sectionTitle}>Nguyên liệu cần chuẩn bị</h3>
+              <ul style={styles.ingredientList}>
+                {(recipe.ingredients || []).map((item, idx) => (
+                  <li key={idx} style={styles.ingredientItem}>
+                    {typeof item === 'string' ? (
+                      item
+                    ) : (
+                      <span>
+                        <strong>{item.name}</strong>:{' '}
+                        {((item.amountPerPerson || 1) * servings).toFixed(1).replace(/\.0$/, '')}{' '}
+                        {item.unit}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              {/* Các bước nấu */}
+              <h3 style={styles.sectionTitle}>Các bước thực hiện</h3>
+              <div style={styles.stepList}>
+                {(recipe.steps || []).map((step, idx) => (
+                  <div key={idx} style={styles.stepItem}>
+                    <span style={styles.stepBadge}>{idx + 1}</span>
+                    <p style={styles.stepText}>{step}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            /* Tab: Mẹo & Đánh giá (Cook Notes & Rating) */
+            <div>
+              {/* Form thêm ghi chú mới */}
+              <form onSubmit={handleAddNote} style={styles.noteForm}>
+                <div style={styles.ratingPickerRow}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#2d3436' }}>
+                    Chấm điểm:
+                  </span>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setNewRating(star)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          fontSize: '1.4rem',
+                          cursor: 'pointer',
+                          padding: 0,
+                          opacity: star <= newRating ? 1 : 0.25,
+                        }}
+                      >
+                        ⭐
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <textarea
+                  required
+                  rows="2"
+                  placeholder="Ghi lại kinh nghiệm của nhà mình (VD: bớt 1 thìa muối, nướng thêm 3 phút thơm hơn...)"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  style={styles.noteInput}
+                />
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="submit" disabled={submittingNote} style={styles.btnSaveNote}>
+                    {submittingNote ? 'Đang lưu...' : '💾 Lưu kinh nghiệm'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Danh sách ghi chú đã lưu */}
+              {loadingNotes ? (
+                <p style={{ textAlign: 'center', color: '#888', padding: '20px' }}>
+                  Đang tải mẹo nấu của bếp...
+                </p>
+              ) : notes.length === 0 ? (
+                <div style={styles.emptyNotes}>
+                  <span style={{ fontSize: '2rem' }}>📝</span>
+                  <p style={{ margin: '8px 0 0 0', color: '#888', fontSize: '0.88rem' }}>
+                    Chưa có ghi chú nào cho món này. Hãy chia sẻ mẹo nấu của bạn!
+                  </p>
+                </div>
+              ) : (
+                <div style={styles.notesFeed}>
+                  {notes.map((item) => (
+                    <div key={item.id} style={styles.noteCard}>
+                      <div style={styles.noteHeader}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: '700', fontSize: '0.85rem', color: '#2d3436' }}>
+                            👤 {item.user_identifier}
+                          </span>
+                          <span style={styles.starDisplay}>
+                            {'⭐'.repeat(item.rating || 5)}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#a4b0be' }}>
+                            {new Date(item.created_at).toLocaleDateString('vi-VN')}
+                          </span>
+                          {currentUser?.id === item.user_id && (
+                            <button
+                              onClick={() => handleDeleteNote(item.id)}
+                              style={styles.btnDeleteNote}
+                              title="Xóa ghi chú"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p style={styles.noteContent}>{item.note}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer nút hành động */}
+        <div style={styles.footer}>
+          <button onClick={onStartCook} style={styles.btnCook}>
+            👨‍🍳 Bắt đầu nấu
+          </button>
+          <button onClick={onAddToCart} style={styles.btnCart}>
+            🛒 Thêm vào giỏ
+          </button>
+          {onEdit && (
+            <button onClick={() => onEdit(recipe)} style={styles.btnEdit}>
+              ✏️ Sửa
             </button>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -136,219 +317,170 @@ export default function RecipeDetailModal({
 const styles = {
   overlay: {
     position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 9999,
-    padding: '20px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 10000,
+    padding: '16px',
   },
   modal: {
     backgroundColor: '#fff',
     borderRadius: '24px',
-    maxWidth: '600px',
+    maxWidth: '540px',
     width: '100%',
     maxHeight: '90vh',
-    overflowY: 'auto',
-    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '0 25px 50px rgba(0,0,0,0.3)',
     position: 'relative',
-    boxSizing: 'border-box',
+    overflow: 'hidden',
+    textAlign: 'left',
   },
   closeBtn: {
     position: 'absolute',
-    top: '16px',
-    right: '16px',
-    zIndex: 10,
-    background: 'rgba(0, 0, 0, 0.5)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '50%',
-    width: '34px',
-    height: '34px',
-    cursor: 'pointer',
-    fontSize: '14px',
+    top: '16px', right: '16px',
+    background: 'rgba(255, 255, 255, 0.9)',
+    border: 'none', borderRadius: '50%',
+    width: '32px', height: '32px',
+    cursor: 'pointer', fontWeight: 'bold',
+    zIndex: 2,
   },
   imageContainer: {
-    position: 'relative',
-    width: '100%',
-    height: '240px',
-    backgroundColor: '#f1f2f6',
+    position: 'relative', width: '100%', height: '180px',
   },
   image: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-  },
-  imageOverlay: {
-    position: 'absolute',
-    inset: 0,
-    background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 60%)',
+    width: '100%', height: '100%', objectFit: 'cover',
   },
   headerInfo: {
-    position: 'absolute',
-    bottom: '16px',
-    left: '20px',
-    right: '20px',
-    color: '#fff',
-    textAlign: 'left',
-  },
-  badge: {
-    backgroundColor: '#e67e22',
-    padding: '3px 10px',
-    borderRadius: '20px',
-    fontSize: '0.75rem',
-    fontWeight: 'bold',
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    background: 'linear-gradient(to top, rgba(0,0,0,0.85), transparent)',
+    padding: '16px 20px 10px 20px', color: '#fff',
   },
   title: {
-    margin: '6px 0 2px 0',
-    fontSize: '1.4rem',
-    fontWeight: '700',
+    margin: 0, fontSize: '1.35rem', fontWeight: '800',
   },
-  time: {
-    margin: 0,
-    fontSize: '0.85rem',
-    color: '#dfe6e9',
-  },
-  body: {
-    padding: '20px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '18px',
-    textAlign: 'left',
-  },
-  desc: {
-    margin: 0,
-    fontSize: '0.9rem',
-    color: '#555',
-    lineHeight: '1.5',
-    background: '#fcf8f2',
-    border: '1px solid #fae5cc',
-    padding: '10px 14px',
-    borderRadius: '12px',
-  },
-  servingsBar: {
-    display: 'flex',
-    justifyContent: 'space-between',
+  metaRow: {
+    display: 'flex', gap: '14px', marginTop: '6px', fontSize: '0.82rem',
     alignItems: 'center',
-    padding: '12px 0',
-    borderTop: '1px solid #f0f0f0',
-    borderBottom: '1px solid #f0f0f0',
   },
-  servingsTitle: {
-    fontWeight: '700',
-    fontSize: '0.95rem',
-    color: '#2c3e50',
+  avgBadge: {
+    backgroundColor: '#f39c12', color: '#fff',
+    padding: '2px 8px', borderRadius: '6px', fontWeight: '700',
   },
-  servingsSub: {
-    margin: '2px 0 0 0',
-    fontSize: '0.75rem',
-    color: '#95a5a6',
+  tabsContainer: {
+    display: 'flex', borderBottom: '1px solid #edf2f7',
+    background: '#f8f9fa',
   },
-  counter: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
+  tabBtn: {
+    flex: 1, padding: '12px', border: 'none', background: 'transparent',
+    fontSize: '0.85rem', fontWeight: '700', color: '#718096',
+    cursor: 'pointer', borderBottom: '3px solid transparent',
   },
-  btnCount: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '50%',
-    border: '1px solid #dcdde1',
-    background: '#fff',
-    fontWeight: 'bold',
-    fontSize: '1rem',
-    cursor: 'pointer',
+  tabActive: {
+    color: '#e67e22', borderBottom: '3px solid #e67e22', background: '#fff',
   },
-  countText: {
-    fontWeight: '700',
-    fontSize: '0.9rem',
+  bodyContent: {
+    padding: '18px 22px', overflowY: 'auto', flex: 1,
   },
-  sectionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '10px',
+  servingsCard: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '10px 14px', backgroundColor: '#fffaf0',
+    border: '1px solid #feebc8', borderRadius: '12px', marginBottom: '14px',
+  },
+  servingsControls: {
+    display: 'flex', alignItems: 'center', gap: '8px',
+  },
+  servingsBtn: {
+    width: '28px', height: '28px', borderRadius: '8px',
+    border: '1px solid #cbd5e0', background: '#fff',
+    cursor: 'pointer', fontWeight: 'bold',
+  },
+  servingsValue: {
+    fontWeight: '700', fontSize: '0.9rem', minWidth: '65px', textAlign: 'center',
   },
   sectionTitle: {
-    margin: '0 0 10px 0',
-    fontSize: '1rem',
-    fontWeight: '700',
-    color: '#2c3e50',
+    fontSize: '0.95rem', margin: '14px 0 8px 0', color: '#2d3436', fontWeight: '700',
   },
-  btnAddCart: {
-    background: '#fff3e0',
-    color: '#e67e22',
-    border: 'none',
-    padding: '6px 12px',
-    borderRadius: '8px',
-    fontWeight: '600',
-    fontSize: '0.8rem',
-    cursor: 'pointer',
+  ingredientList: {
+    paddingLeft: '18px', margin: '0 0 14px 0', fontSize: '0.9rem', color: '#4a5568',
   },
-  ingredientGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: '8px',
+  ingredientItem: {
+    marginBottom: '5px',
   },
-  ingredientCard: {
-    background: '#f8f9fa',
-    padding: '8px 12px',
-    borderRadius: '10px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: '0.85rem',
-    color: '#444',
-  },
-  dot: {
-    color: '#e67e22',
-    marginRight: '6px',
-  },
-  stepsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
+  stepList: {
+    display: 'flex', flexDirection: 'column', gap: '10px',
   },
   stepItem: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '10px',
-    fontSize: '0.85rem',
-    color: '#444',
-    lineHeight: '1.4',
+    display: 'flex', gap: '10px', alignItems: 'flex-start',
   },
-  stepNumber: {
-    background: '#fff3e0',
-    color: '#e67e22',
-    fontWeight: 'bold',
-    width: '22px',
-    height: '22px',
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '0.75rem',
-    flexShrink: 0,
+  stepBadge: {
+    width: '22px', height: '22px', borderRadius: '50%',
+    backgroundColor: '#e67e22', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '0.75rem', fontWeight: 'bold', flexShrink: 0, marginTop: '2px',
   },
   stepText: {
-    paddingTop: '2px',
+    margin: 0, fontSize: '0.88rem', color: '#2d3436', lineHeight: '1.5',
+  },
+  noteForm: {
+    backgroundColor: '#f8f9fa', padding: '14px', borderRadius: '14px',
+    border: '1px solid #edf2f7', marginBottom: '16px',
+  },
+  ratingPickerRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: '10px',
+  },
+  noteInput: {
+    width: '100%', padding: '10px', borderRadius: '10px',
+    border: '1px solid #dcdde1', fontSize: '0.85rem',
+    outline: 'none', boxSizing: 'border-box', resize: 'vertical',
+  },
+  btnSaveNote: {
+    marginTop: '8px', backgroundColor: '#e67e22', color: '#fff',
+    border: 'none', padding: '8px 14px', borderRadius: '8px',
+    fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer',
+  },
+  emptyNotes: {
+    textAlign: 'center', padding: '30px 10px',
+  },
+  notesFeed: {
+    display: 'flex', flexDirection: 'column', gap: '10px',
+  },
+  noteCard: {
+    backgroundColor: '#fff', padding: '12px 14px', borderRadius: '12px',
+    border: '1px solid #edf2f7', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+  },
+  noteHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: '6px',
+  },
+  starDisplay: {
+    fontSize: '0.8rem',
+  },
+  btnDeleteNote: {
+    background: 'none', border: 'none', color: '#b2bec3',
+    cursor: 'pointer', fontSize: '0.85rem',
+  },
+  noteContent: {
+    margin: 0, fontSize: '0.88rem', color: '#2d3436', lineHeight: '1.45',
   },
   footer: {
-    paddingTop: '10px',
+    display: 'flex', gap: '8px', padding: '14px 20px',
+    borderTop: '1px solid #edf2f7', background: '#fff',
   },
   btnCook: {
-    width: '100%',
-    padding: '12px',
-    background: 'linear-gradient(135deg, #e67e22, #d35400)',
-    border: 'none',
-    borderRadius: '14px',
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: '1rem',
-    cursor: 'pointer',
-    boxShadow: '0 4px 15px rgba(230, 126, 34, 0.3)',
+    flex: 2, backgroundColor: '#27ae60', color: '#fff',
+    border: 'none', padding: '11px', borderRadius: '12px',
+    fontWeight: '700', fontSize: '0.9rem', cursor: 'pointer',
+  },
+  btnCart: {
+    flex: 2, backgroundColor: '#e67e22', color: '#fff',
+    border: 'none', padding: '11px', borderRadius: '12px',
+    fontWeight: '700', fontSize: '0.9rem', cursor: 'pointer',
+  },
+  btnEdit: {
+    flex: 1, backgroundColor: '#f1f2f6', color: '#2d3436',
+    border: 'none', padding: '11px', borderRadius: '12px',
+    fontWeight: '600', fontSize: '0.9rem', cursor: 'pointer',
   },
 };

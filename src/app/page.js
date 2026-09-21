@@ -692,6 +692,8 @@ export default function Home() {
           setCookStep(0);
           setActiveRecipe(null);
         }}
+        currentUser={user}
+        currentKitchen={kitchenData?.kitchen}
       />
 
       {/* Chế độ nấu ăn tập trung (Cook Mode + Wake Lock + Bấm giờ) */}
