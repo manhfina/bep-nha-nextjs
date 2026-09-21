@@ -340,6 +340,16 @@ export default function Home() {
     selectedDifficulty !== 'all' ||
     selectedTimeRange !== 'all';
 
+  // Hiển thị tên tài khoản (tự động nhận diện số điện thoại hoặc email)
+  const getUserDisplayName = () => {
+    if (!user) return '';
+    const email = user.email || '';
+    if (email.includes('@phone.bepnha.local')) {
+      return email.replace('@phone.bepnha.local', '');
+    }
+    return email.split('@')[0];
+  };
+
   return (
     <div className="container">
       {/* Header tích hợp trạng thái Đăng nhập / Đăng xuất */}
@@ -367,7 +377,7 @@ export default function Home() {
                   borderRadius: '10px',
                 }}
               >
-                👤 {user.email?.split('@')[0]}
+                👤 {getUserDisplayName()}
               </span>
               <button
                 onClick={async () => {
