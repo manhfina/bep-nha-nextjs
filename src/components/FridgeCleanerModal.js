@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import AiScannerModal from './AiScannerModal';
 
 // Danh sách các nguyên liệu phổ biến trong căn bếp Việt để chọn nhanh
 const COMMON_INGREDIENTS = [
@@ -17,6 +18,7 @@ export default function FridgeCleanerModal({
 }) {
   const [selectedIngredients, setSelectedIngredients] = useState([]);
   const [customInput, setCustomInput] = useState('');
+  const [isAiScannerOpen, setIsAiScannerOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -70,135 +72,158 @@ export default function FridgeCleanerModal({
   .sort((a, b) => b.matchPercentage - a.matchPercentage);
 
   return (
-    <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} style={styles.closeBtn}>✕</button>
+    <>
+      <div style={styles.overlay} onClick={onClose}>
+        <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+          <button onClick={onClose} style={styles.closeBtn}>✕</button>
 
-        <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-          <h2 style={styles.title}>🧊 Dọn tủ lạnh thông minh</h2>
-          <p style={{ color: '#666', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
-            Chọn những nguyên liệu bạn đang có sẵn, Bếp Nhà sẽ tìm món phù hợp nhất!
-          </p>
-        </div>
-
-        {/* Danh sách chọn nhanh nguyên liệu */}
-        <div style={styles.tagsContainer}>
-          {COMMON_INGREDIENTS.map((item) => {
-            const isSelected = selectedIngredients.includes(item.toLowerCase());
-            return (
-              <button
-                key={item}
-                type="button"
-                onClick={() => toggleIngredient(item)}
-                style={{
-                  ...styles.tagBtn,
-                  backgroundColor: isSelected ? '#27ae60' : '#f1f2f6',
-                  color: isSelected ? '#fff' : '#2d3436',
-                  borderColor: isSelected ? '#27ae60' : 'transparent',
-                }}
-              >
-                {isSelected ? '✓ ' : '+ '} {item}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Ô nhập nguyên liệu khác */}
-        <form onSubmit={handleAddCustom} style={styles.customForm}>
-          <input
-            type="text"
-            placeholder="Hoặc gõ thêm nguyên liệu khác..."
-            value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
-            style={styles.customInput}
-          />
-          <button type="submit" style={styles.btnAddCustom}>Thêm</button>
-        </form>
-
-        {/* Đã chọn */}
-        {selectedIngredients.length > 0 && (
-          <div style={styles.selectedBox}>
-            <span style={{ fontSize: '0.8rem', color: '#555', fontWeight: 'bold' }}>Tủ lạnh đang có:</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
-              {selectedIngredients.map((ing) => (
-                <span key={ing} style={styles.badgeItem}>
-                  {ing}
-                  <button onClick={() => toggleIngredient(ing)} style={styles.badgeRemove}>✕</button>
-                </span>
-              ))}
-              <button
-                onClick={() => setSelectedIngredients([])}
-                style={{ background: 'none', border: 'none', color: '#e74c3c', fontSize: '0.75rem', cursor: 'pointer', marginLeft: '6px' }}
-              >
-                Xóa hết
-              </button>
-            </div>
+          <div style={{ textAlign: 'center', marginBottom: '14px' }}>
+            <h2 style={styles.title}>🧊 Dọn tủ lạnh thông minh</h2>
+            <p style={{ color: '#666', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
+              Chọn hoặc chụp ảnh tủ lạnh, Bếp Nhà sẽ tìm món phù hợp nhất!
+            </p>
           </div>
-        )}
 
-        {/* Kết quả món gợi ý */}
-        <div style={styles.resultSection}>
-          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.95rem', color: '#2d3436' }}>
-            Món gợi ý ({analyzedRecipes.length})
-          </h4>
+          {/* Nút kích hoạt AI Vision Scanner */}
+          <div style={{ marginBottom: '12px' }}>
+            <button
+              type="button"
+              onClick={() => setIsAiScannerOpen(true)}
+              style={styles.btnAiScan}
+            >
+              🤖📸 Quét tủ lạnh / Hóa đơn bằng AI
+            </button>
+          </div>
 
-          {selectedIngredients.length === 0 ? (
-            <p style={styles.emptyText}>Hãy bấm chọn ít nhất một nguyên liệu ở trên để xem gợi ý.</p>
-          ) : analyzedRecipes.length === 0 ? (
-            <p style={styles.emptyText}>Chưa có món nào trong sổ tay dùng các nguyên liệu này.</p>
-          ) : (
-            <div style={styles.recipeList}>
-              {analyzedRecipes.map((item) => (
-                <div key={item.id} style={styles.card}>
-                  <img src={item.image} alt={item.title} style={styles.cardImg} />
-                  <div style={{ flex: 1, textAlign: 'left' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h4 style={{ margin: 0, fontSize: '0.95rem', color: '#2d3436' }}>{item.title}</h4>
-                      <span
-                        style={{
-                          ...styles.matchBadge,
-                          backgroundColor: item.matchPercentage === 100 ? '#e8f8f5' : '#fef9e7',
-                          color: item.matchPercentage === 100 ? '#27ae60' : '#d35400',
-                        }}
-                      >
-                        {item.matchPercentage === 100 ? '🎉 Nấu được ngay' : `Khớp ${item.matchPercentage}%`}
-                      </span>
-                    </div>
+          {/* Danh sách chọn nhanh nguyên liệu */}
+          <div style={styles.tagsContainer}>
+            {COMMON_INGREDIENTS.map((item) => {
+              const isSelected = selectedIngredients.includes(item.toLowerCase());
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => toggleIngredient(item)}
+                  style={{
+                    ...styles.tagBtn,
+                    backgroundColor: isSelected ? '#27ae60' : '#f1f2f6',
+                    color: isSelected ? '#fff' : '#2d3436',
+                    borderColor: isSelected ? '#27ae60' : 'transparent',
+                  }}
+                >
+                  {isSelected ? '✓ ' : '+ '} {item}
+                </button>
+              );
+            })}
+          </div>
 
-                    {item.missingItems.length > 0 && (
-                      <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: '#7f8c8d' }}>
-                        Còn thiếu: <span style={{ color: '#e74c3c' }}>{item.missingItems.join(', ')}</span>
-                      </p>
-                    )}
+          {/* Ô nhập nguyên liệu khác */}
+          <form onSubmit={handleAddCustom} style={styles.customForm}>
+            <input
+              type="text"
+              placeholder="Hoặc gõ thêm nguyên liệu khác..."
+              value={customInput}
+              onChange={(e) => setCustomInput(e.target.value)}
+              style={styles.customInput}
+            />
+            <button type="submit" style={styles.btnAddCustom}>Thêm</button>
+          </form>
 
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                      <button
-                        onClick={() => {
-                          onClose();
-                          onOpenDetail(item);
-                        }}
-                        style={styles.btnView}
-                      >
-                        Xem cách nấu
-                      </button>
-
-                      {item.missingItems.length > 0 && onAddMissingToCart && (
-                        <button
-                          onClick={() => onAddMissingToCart(item.title, item.missingItems)}
-                          style={styles.btnAddCart}
-                        >
-                          + Mua đồ còn thiếu
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
+          {/* Đã chọn */}
+          {selectedIngredients.length > 0 && (
+            <div style={styles.selectedBox}>
+              <span style={{ fontSize: '0.8rem', color: '#555', fontWeight: 'bold' }}>Tủ lạnh đang có:</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                {selectedIngredients.map((ing) => (
+                  <span key={ing} style={styles.badgeItem}>
+                    {ing}
+                    <button onClick={() => toggleIngredient(ing)} style={styles.badgeRemove}>✕</button>
+                  </span>
+                ))}
+                <button
+                  onClick={() => setSelectedIngredients([])}
+                  style={{ background: 'none', border: 'none', color: '#e74c3c', fontSize: '0.75rem', cursor: 'pointer', marginLeft: '6px' }}
+                >
+                  Xóa hết
+                </button>
+              </div>
             </div>
           )}
+
+          {/* Kết quả món gợi ý */}
+          <div style={styles.resultSection}>
+            <h4 style={{ margin: '0 0 10px 0', fontSize: '0.95rem', color: '#2d3436' }}>
+              Món gợi ý ({analyzedRecipes.length})
+            </h4>
+
+            {selectedIngredients.length === 0 ? (
+              <p style={styles.emptyText}>Hãy bấm chọn hoặc dùng AI quét nguyên liệu ở trên để xem gợi ý.</p>
+            ) : analyzedRecipes.length === 0 ? (
+              <p style={styles.emptyText}>Chưa có món nào trong sổ tay dùng các nguyên liệu này.</p>
+            ) : (
+              <div style={styles.recipeList}>
+                {analyzedRecipes.map((item) => (
+                  <div key={item.id} style={styles.card}>
+                    <img src={item.image} alt={item.title} style={styles.cardImg} />
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h4 style={{ margin: 0, fontSize: '0.95rem', color: '#2d3436' }}>{item.title}</h4>
+                        <span
+                          style={{
+                            ...styles.matchBadge,
+                            backgroundColor: item.matchPercentage === 100 ? '#e8f8f5' : '#fef9e7',
+                            color: item.matchPercentage === 100 ? '#27ae60' : '#d35400',
+                          }}
+                        >
+                          {item.matchPercentage === 100 ? '🎉 Nấu được ngay' : `Khớp ${item.matchPercentage}%`}
+                        </span>
+                      </div>
+
+                      {item.missingItems.length > 0 && (
+                        <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: '#7f8c8d' }}>
+                          Còn thiếu: <span style={{ color: '#e74c3c' }}>{item.missingItems.join(', ')}</span>
+                        </p>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                        <button
+                          onClick={() => {
+                            onClose();
+                            onOpenDetail(item);
+                          }}
+                          style={styles.btnView}
+                        >
+                          Xem cách nấu
+                        </button>
+
+                        {item.missingItems.length > 0 && onAddMissingToCart && (
+                          <button
+                            onClick={() => onAddMissingToCart(item.title, item.missingItems)}
+                            style={styles.btnAddCart}
+                          >
+                            + Mua đồ còn thiếu
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Modal Quét ảnh AI Vision */}
+      <AiScannerModal
+        isOpen={isAiScannerOpen}
+        onClose={() => setIsAiScannerOpen(false)}
+        onApplyItems={(items) => {
+          const newNames = items.map((i) => i.name.toLowerCase().trim());
+          setSelectedIngredients((prev) => Array.from(new Set([...prev, ...newNames])));
+        }}
+      />
+    </>
   );
 }
 
@@ -236,6 +261,23 @@ const styles = {
     fontSize: '1.35rem',
     fontWeight: '700',
     color: '#2d3436',
+  },
+  btnAiScan: {
+    width: '100%',
+    backgroundColor: '#8e44ad',
+    color: '#fff',
+    border: 'none',
+    padding: '10px 14px',
+    borderRadius: '12px',
+    fontWeight: '700',
+    fontSize: '0.9rem',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    boxShadow: '0 4px 12px rgba(142, 68, 173, 0.25)',
+    transition: 'all 0.2s',
   },
   tagsContainer: {
     display: 'flex',
