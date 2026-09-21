@@ -26,8 +26,9 @@ export default function Home() {
   const [kitchenData, setKitchenData] = useState(null);
   const [isKitchenOpen, setIsKitchenOpen] = useState(false);
 
-  // Search & Filter state
+  // Search, Voice Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
+  const [isListening, setIsListening] = useState(false);
   const [currentTab, setCurrentTab] = useState('all');
   const [selectedTag, setSelectedTag] = useState(null);
   const [selectedDifficulty, setSelectedDifficulty] = useState('all');
@@ -60,7 +61,7 @@ export default function Home() {
     steps: item.steps || item.instructions || [],
   });
 
-  // 1. Tải công thức món ăn từ API
+  // 1. Tải công thức từ API
   const fetchRecipes = async () => {
     setLoading(true);
     try {
@@ -77,7 +78,7 @@ export default function Home() {
     setLoading(false);
   };
 
-  // 2. Tải thông tin Bếp gia đình của người dùng
+  // 2. Tải thông tin Bếp gia đình
   const fetchKitchen = async (currentUserId) => {
     if (!currentUserId) {
       setKitchenData(null);
@@ -92,14 +93,13 @@ export default function Home() {
     }
   };
 
-  // 3. Tải danh sách Favorites và Shopping List theo User/Kitchen
+  // 3. Tải favorites và shopping-list theo User hoặc Bếp
   const loadUserData = (currentUserId, currentKitchenId) => {
     const params = new URLSearchParams();
     if (currentUserId) params.set('userId', currentUserId);
     if (currentKitchenId) params.set('kitchenId', currentKitchenId);
     const queryString = params.toString() ? `?${params.toString()}` : '';
 
-    // Tải favorites
     fetch(`/api/favorites${queryString}`)
       .then((res) => res.json())
       .then((ids) => {
@@ -107,7 +107,6 @@ export default function Home() {
       })
       .catch((err) => console.error('Lỗi tải favorites:', err));
 
-    // Tải shopping-list
     fetch(`/api/shopping-list${queryString}`)
       .then((res) => res.json())
       .then((items) => {
@@ -116,23 +115,20 @@ export default function Home() {
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
   };
 
-  // Khởi tạo và lắng nghe phiên đăng nhập Supabase
+  // Khởi tạo và lắng nghe phiên đăng nhập & Realtime Supabase
   useEffect(() => {
     fetchRecipes();
 
-    // Lấy session hiện tại
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
     });
 
-    // Lắng nghe thay đổi đăng nhập / đăng xuất
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
 
-    // Realtime cập nhật danh sách món ăn
     const channel = supabase
       .channel('realtime-recipes')
       .on(
@@ -165,7 +161,7 @@ export default function Home() {
     };
   }, []);
 
-  // Cập nhật thông tin bếp khi user thay đổi
+  // Tải thông tin bếp khi user thay đổi
   useEffect(() => {
     if (user) {
       fetchKitchen(user.id);
@@ -182,7 +178,71 @@ export default function Home() {
     }
   }, [kitchenData, user]);
 
-  // Bật / Tắt Yêu thích
+  // Tự động mở chi tiết món ăn khi người dùng truy cập từ Link chia sẻ / Mã QR (?recipe=ID)
+  useEffect(() => {
+    if (recipes.length > 0 && typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sharedRecipeId = urlParams.get('recipe');
+      if (sharedRecipeId) {
+        const found = recipes.find((r) => String(r.id) === String(sharedRecipeId));
+        if (found) {
+          setActiveRecipe(found);
+          setServings(found.baseServings || 2);
+        }
+      }
+    }
+  }, [recipes]);
+
+  // Xử lý Tìm kiếm bằng giọng nói tiếng Việt
+  const handleVoiceSearch = () => {
+    const SpeechRecognition =
+      typeof window !== 'undefined' &&
+      (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+    if (!SpeechRecognition) {
+      alert('Trình duyệt của bạn chưa hỗ trợ nhận diện giọng nói. Hãy dùng Google Chrome hoặc Safari nhé!');
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'vi-VN';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      if (transcript) {
+        const cleanedText = transcript.replace(/[.,?!]$/, '').trim();
+        setSearchTerm(cleanedText);
+      }
+      setIsListening(false);
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Lỗi nhận diện giọng nói:', event.error);
+      setIsListening(false);
+      if (event.error === 'not-allowed') {
+        alert('Vui lòng cho phép quyền truy cập Micro trên trình duyệt để sử dụng tính năng này!');
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
+  // Toggle Yêu thích
   const toggleFavorite = async (e, id) => {
     if (e && e.stopPropagation) e.stopPropagation();
 
@@ -213,7 +273,7 @@ export default function Home() {
     setServings(recipe.baseServings || 2);
   };
 
-  // Thêm nguyên liệu từ chi tiết món vào Giỏ đi chợ
+  // Thêm nguyên liệu từ chi tiết món vào Giỏ
   const addToCart = async () => {
     if (!activeRecipe) return;
 
@@ -247,7 +307,7 @@ export default function Home() {
     }
   };
 
-  // Thêm nguyên liệu còn thiếu từ modal Dọn tủ lạnh
+  // Thêm nguyên liệu còn thiếu từ Dọn tủ lạnh vào giỏ
   const handleAddMissingToCart = async (dishTitle, missingItems) => {
     const newItems = missingItems.map((text) => ({
       dish: dishTitle,
@@ -274,7 +334,7 @@ export default function Home() {
     }
   };
 
-  // Nạp toàn bộ nguyên liệu của thực đơn tuần vào giỏ
+  // Nạp toàn bộ món trong thực đơn tuần vào giỏ
   const handleAddPlanToCart = async (plannedRecipes) => {
     const newItems = [];
     plannedRecipes.forEach((recipe) => {
@@ -388,7 +448,6 @@ export default function Home() {
     selectedDifficulty !== 'all' ||
     selectedTimeRange !== 'all';
 
-  // Hiển thị tên hiển thị của tài khoản
   const getUserDisplayName = () => {
     if (!user) return '';
     const email = user.email || '';
@@ -400,7 +459,7 @@ export default function Home() {
 
   return (
     <div className="container">
-      {/* Header: Logo, Trạng thái User và Nút Bếp Gia Đình */}
+      {/* Header */}
       <header
         style={{
           display: 'flex',
@@ -415,7 +474,6 @@ export default function Home() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {user ? (
             <>
-              {/* Nút Bếp gia đình */}
               <button
                 onClick={() => setIsKitchenOpen(true)}
                 style={{
@@ -435,7 +493,6 @@ export default function Home() {
                 🏡 {kitchenData?.kitchen ? kitchenData.kitchen.name : 'Vào Bếp gia đình'}
               </button>
 
-              {/* Thông tin tài khoản */}
               <span
                 style={{
                   fontSize: '0.85rem',
@@ -449,7 +506,6 @@ export default function Home() {
                 👤 {getUserDisplayName()}
               </span>
 
-              {/* Nút Đăng xuất */}
               <button
                 onClick={async () => {
                   await supabase.auth.signOut();
@@ -491,14 +547,48 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Thanh tìm kiếm, Random, Dọn tủ lạnh, Lịch tuần và Tabs */}
+      {/* Thanh tìm kiếm có Micro, Random, Dọn tủ lạnh, Lịch tuần và Tabs */}
       <div className="search-bar">
-        <input
-          type="text"
-          placeholder="🔍 Tìm theo tên món..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
+        <div style={{ position: 'relative', flex: '1 1 240px', display: 'flex', alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder={isListening ? '🎙️ Đang lắng nghe bạn nói...' : '🔍 Tìm theo tên món hoặc nguyên liệu...'}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: '100%',
+              paddingRight: '45px',
+              border: isListening ? '2px solid #e74c3c' : undefined,
+              backgroundColor: isListening ? '#fff5f5' : undefined,
+              transition: 'all 0.2s ease',
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleVoiceSearch}
+            title={isListening ? 'Bấm để dừng nghe' : 'Tìm kiếm bằng giọng nói'}
+            style={{
+              position: 'absolute',
+              right: '8px',
+              background: isListening ? '#e74c3c' : 'transparent',
+              border: 'none',
+              borderRadius: '50%',
+              width: '32px',
+              height: '32px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              fontSize: '1.1rem',
+              color: isListening ? '#fff' : '#636e72',
+              animation: isListening ? 'pulseMic 1s infinite' : 'none',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {isListening ? '🔴' : '🎙️'}
+          </button>
+        </div>
+
         <button
           onClick={() => setCurrentTab('all')}
           className={`btn-filter ${currentTab === 'all' ? 'active' : ''}`}
@@ -552,7 +642,6 @@ export default function Home() {
           border: '1px solid rgba(0,0,0,0.05)',
         }}
       >
-        {/* Lọc tủ lạnh */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'bold' }}>Tủ lạnh:</span>
           {['trứng', 'bò', 'cà chua', 'cần tây'].map((tag) => (
@@ -569,7 +658,6 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Lọc Độ khó */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'bold' }}>Độ khó:</span>
           <select
@@ -592,7 +680,6 @@ export default function Home() {
           </select>
         </div>
 
-        {/* Lọc Thời gian */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'bold' }}>Thời gian:</span>
           <select
@@ -614,7 +701,6 @@ export default function Home() {
           </select>
         </div>
 
-        {/* Nút Đặt lại bộ lọc */}
         {hasActiveFilters && (
           <button
             onClick={handleResetFilters}
@@ -676,7 +762,7 @@ export default function Home() {
         🛒 Giỏ đi chợ <span className="badge">{shoppingList.length}</span>
       </button>
 
-      {/* Chi tiết món ăn */}
+      {/* Modal Chi tiết món ăn */}
       <RecipeDetailModal
         recipe={activeRecipe}
         servings={servings}
@@ -696,7 +782,7 @@ export default function Home() {
         currentKitchen={kitchenData?.kitchen}
       />
 
-      {/* Chế độ nấu ăn tập trung (Cook Mode + Wake Lock + Bấm giờ) */}
+      {/* Modal Chế độ nấu ăn (Cook Mode + Wake Lock + Bấm giờ) */}
       <CookModeModal
         recipe={cookModeRecipe}
         step={cookStep}
@@ -712,7 +798,7 @@ export default function Home() {
         }}
       />
 
-      {/* Giỏ đi chợ & Dự toán chi phí */}
+      {/* Modal Giỏ đi chợ */}
       <CartModal
         isOpen={isCartOpen}
         shoppingList={shoppingList}
@@ -743,14 +829,14 @@ export default function Home() {
         }}
       />
 
-      {/* Thêm công thức */}
+      {/* Modal Thêm công thức */}
       <AddRecipeModal
         isOpen={isAddOpen}
         onClose={() => setIsAddOpen(false)}
         onRecipeAdded={handleRecipeAdded}
       />
 
-      {/* Sửa công thức */}
+      {/* Modal Sửa công thức */}
       <EditRecipeModal
         isOpen={!!editRecipe}
         recipe={editRecipe}
@@ -758,7 +844,7 @@ export default function Home() {
         onRecipeUpdated={handleRecipeUpdated}
       />
 
-      {/* Hôm nay ăn gì */}
+      {/* Modal Hôm nay ăn gì */}
       <RandomMealModal
         isOpen={isRandomOpen}
         recipes={recipes}
@@ -766,7 +852,7 @@ export default function Home() {
         onOpenDetail={openDetail}
       />
 
-      {/* Dọn tủ lạnh */}
+      {/* Modal Dọn tủ lạnh */}
       <FridgeCleanerModal
         isOpen={isFridgeOpen}
         recipes={recipes}
@@ -775,7 +861,7 @@ export default function Home() {
         onAddMissingToCart={handleAddMissingToCart}
       />
 
-      {/* Lên lịch tuần */}
+      {/* Modal Lên lịch thực đơn tuần */}
       <MealPlannerModal
         isOpen={isPlannerOpen}
         recipes={recipes}
@@ -786,14 +872,14 @@ export default function Home() {
         currentKitchenId={kitchenData?.kitchen?.id}
       />
 
-      {/* Đăng nhập / Đăng ký */}
+      {/* Modal Đăng nhập / Đăng ký */}
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onAuthSuccess={(loggedUser) => setUser(loggedUser)}
       />
 
-      {/* Bếp Gia Đình */}
+      {/* Modal Bếp Gia Đình */}
       <FamilyKitchenModal
         isOpen={isKitchenOpen}
         onClose={() => setIsKitchenOpen(false)}
