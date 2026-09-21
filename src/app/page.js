@@ -780,6 +780,8 @@ export default function Home() {
         onClose={() => setIsPlannerOpen(false)}
         onOpenDetail={openDetail}
         onAddPlanToCart={handleAddPlanToCart}
+        currentUserId={user?.id}
+        currentKitchenId={kitchenData?.kitchen?.id}
       />
 
       {/* Đăng nhập / Đăng ký */}
