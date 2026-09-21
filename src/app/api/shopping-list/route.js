@@ -1,20 +1,23 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-// GET: Lấy các nguyên liệu trong giỏ của user
+// GET: Lấy các nguyên liệu trong giỏ (Ưu tiên theo kitchenId, sau đó đến userId)
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('userId');
+  const kitchenId = searchParams.get('kitchenId');
 
   let query = supabase
     .from('shopping_list')
     .select('*')
     .order('created_at', { ascending: true });
 
-  if (userId) {
-    query = query.eq('user_id', userId);
+  if (kitchenId) {
+    query = query.eq('kitchen_id', kitchenId);
+  } else if (userId) {
+    query = query.eq('user_id', userId).is('kitchen_id', null);
   } else {
-    query = query.is('user_id', null);
+    query = query.is('user_id', null).is('kitchen_id', null);
   }
 
   const { data, error } = await query;
@@ -26,18 +29,19 @@ export async function GET(request) {
   return NextResponse.json(data);
 }
 
-// POST: Thêm nguyên liệu vào giỏ của user
+// POST: Thêm nguyên liệu vào giỏ
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { items, userId } = Array.isArray(body)
-      ? { items: body, userId: null }
-      : { items: body.items || [body], userId: body.userId || null };
+    const { items, userId, kitchenId } = Array.isArray(body)
+      ? { items: body, userId: null, kitchenId: null }
+      : { items: body.items || [body], userId: body.userId || null, kitchenId: body.kitchenId || null };
 
     const itemsToInsert = items.map((item) => ({
       dish: item.dish,
       text: item.text,
       user_id: userId || item.userId || null,
+      kitchen_id: kitchenId || item.kitchenId || null,
     }));
 
     const { data, error } = await supabase
@@ -52,23 +56,23 @@ export async function POST(request) {
   }
 }
 
-// DELETE: Xóa 1 món hoặc xóa toàn bộ giỏ của user
+// DELETE: Xóa món hoặc dọn toàn bộ giỏ
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     const userId = searchParams.get('userId');
+    const kitchenId = searchParams.get('kitchenId');
 
     let query = supabase.from('shopping_list').delete();
 
     if (id) {
-      // Xóa 1 dòng cụ thể
       query = query.eq('id', id);
+    } else if (kitchenId) {
+      query = query.eq('kitchen_id', kitchenId);
     } else if (userId) {
-      // Dọn giỏ của riêng user đó
       query = query.eq('user_id', userId);
     } else {
-      // Dọn giỏ của khách vãng lai (null)
       query = query.is('user_id', null);
     }
 

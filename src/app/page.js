@@ -12,6 +12,7 @@ import RandomMealModal from '../components/RandomMealModal';
 import FridgeCleanerModal from '../components/FridgeCleanerModal';
 import MealPlannerModal from '../components/MealPlannerModal';
 import AuthModal from '../components/AuthModal';
+import FamilyKitchenModal from '../components/FamilyKitchenModal';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
@@ -19,9 +20,11 @@ export default function Home() {
   const [favorites, setFavorites] = useState([]);
   const [shoppingList, setShoppingList] = useState([]);
 
-  // Auth state
+  // Auth & Family Kitchen state
   const [user, setUser] = useState(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [kitchenData, setKitchenData] = useState(null);
+  const [isKitchenOpen, setIsKitchenOpen] = useState(false);
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,7 +47,7 @@ export default function Home() {
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
 
-  // Hàm chuẩn hóa dữ liệu món ăn
+  // Chuẩn hóa dữ liệu món ăn
   const formatRecipe = (item) => ({
     ...item,
     desc: item.desc || item.description || '',
@@ -57,7 +60,7 @@ export default function Home() {
     steps: item.steps || item.instructions || [],
   });
 
-  // 1. Tải công thức từ API
+  // 1. Tải công thức món ăn từ API
   const fetchRecipes = async () => {
     setLoading(true);
     try {
@@ -74,42 +77,62 @@ export default function Home() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    loadUserData(user?.id);
-  }, [user]);
+  // 2. Tải thông tin Bếp gia đình của người dùng
+  const fetchKitchen = async (currentUserId) => {
+    if (!currentUserId) {
+      setKitchenData(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/kitchen?userId=${currentUserId}`);
+      const data = await res.json();
+      setKitchenData(data);
+    } catch (err) {
+      console.error('Lỗi tải thông tin bếp:', err);
+    }
+  };
 
-    // Kiểm tra phiên đăng nhập hiện tại
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-    });
+  // 3. Tải danh sách Favorites và Shopping List theo User/Kitchen
+  const loadUserData = (currentUserId, currentKitchenId) => {
+    const params = new URLSearchParams();
+    if (currentUserId) params.set('userId', currentUserId);
+    if (currentKitchenId) params.set('kitchenId', currentKitchenId);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
 
-    // Lắng nghe thay đổi trạng thái đăng nhập / đăng xuất
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    const loadUserData = (currentUserId) => {
-    const userParam = currentUserId ? `?userId=${currentUserId}` : '';
-
-    // Tải favorites theo user
-    fetch(`/api/favorites${userParam}`)
+    // Tải favorites
+    fetch(`/api/favorites${queryString}`)
       .then((res) => res.json())
       .then((ids) => {
         if (Array.isArray(ids)) setFavorites(ids.map(String));
       })
       .catch((err) => console.error('Lỗi tải favorites:', err));
 
-    // Tải shopping-list theo user
-    fetch(`/api/shopping-list${userParam}`)
+    // Tải shopping-list
+    fetch(`/api/shopping-list${queryString}`)
       .then((res) => res.json())
       .then((items) => {
         if (Array.isArray(items)) setShoppingList(items);
       })
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
-      };
-    // Lắng nghe sự kiện Realtime từ Supabase cho bảng recipes
+  };
+
+  // Khởi tạo và lắng nghe phiên đăng nhập Supabase
+  useEffect(() => {
+    fetchRecipes();
+
+    // Lấy session hiện tại
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    // Lắng nghe thay đổi đăng nhập / đăng xuất
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    // Realtime cập nhật danh sách món ăn
     const channel = supabase
       .channel('realtime-recipes')
       .on(
@@ -142,6 +165,24 @@ export default function Home() {
     };
   }, []);
 
+  // Cập nhật thông tin bếp khi user thay đổi
+  useEffect(() => {
+    if (user) {
+      fetchKitchen(user.id);
+    } else {
+      setKitchenData(null);
+      loadUserData(null, null);
+    }
+  }, [user]);
+
+  // Cập nhật giỏ hàng & yêu thích khi bếp hoặc user thay đổi
+  useEffect(() => {
+    if (user) {
+      loadUserData(user.id, kitchenData?.kitchen?.id || null);
+    }
+  }, [kitchenData, user]);
+
+  // Bật / Tắt Yêu thích
   const toggleFavorite = async (e, id) => {
     if (e && e.stopPropagation) e.stopPropagation();
 
@@ -172,6 +213,7 @@ export default function Home() {
     setServings(recipe.baseServings || 2);
   };
 
+  // Thêm nguyên liệu từ chi tiết món vào Giỏ đi chợ
   const addToCart = async () => {
     if (!activeRecipe) return;
 
@@ -189,7 +231,11 @@ export default function Home() {
       const res = await fetch('/api/shopping-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: newItems, userId: user?.id || null }),
+        body: JSON.stringify({
+          items: newItems,
+          userId: user?.id || null,
+          kitchenId: kitchenData?.kitchen?.id || null,
+        }),
       });
 
       if (!res.ok) throw new Error('Không thể thêm vào giỏ');
@@ -201,7 +247,7 @@ export default function Home() {
     }
   };
 
-  // Xử lý thêm nguyên liệu còn thiếu từ modal Dọn tủ lạnh vào giỏ
+  // Thêm nguyên liệu còn thiếu từ modal Dọn tủ lạnh
   const handleAddMissingToCart = async (dishTitle, missingItems) => {
     const newItems = missingItems.map((text) => ({
       dish: dishTitle,
@@ -212,7 +258,11 @@ export default function Home() {
       const res = await fetch('/api/shopping-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItems),
+        body: JSON.stringify({
+          items: newItems,
+          userId: user?.id || null,
+          kitchenId: kitchenData?.kitchen?.id || null,
+        }),
       });
 
       if (!res.ok) throw new Error('Không thể thêm vào giỏ');
@@ -224,7 +274,7 @@ export default function Home() {
     }
   };
 
-  // Nạp toàn bộ nguyên liệu của các món trong thực đơn tuần vào giỏ đi chợ
+  // Nạp toàn bộ nguyên liệu của thực đơn tuần vào giỏ
   const handleAddPlanToCart = async (plannedRecipes) => {
     const newItems = [];
     plannedRecipes.forEach((recipe) => {
@@ -244,7 +294,11 @@ export default function Home() {
       const res = await fetch('/api/shopping-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItems),
+        body: JSON.stringify({
+          items: newItems,
+          userId: user?.id || null,
+          kitchenId: kitchenData?.kitchen?.id || null,
+        }),
       });
 
       if (!res.ok) throw new Error('Không thể nạp vào giỏ');
@@ -288,7 +342,6 @@ export default function Home() {
     }
   };
 
-  // Reset bộ lọc về mặc định
   const handleResetFilters = () => {
     setSearchTerm('');
     setCurrentTab('all');
@@ -297,7 +350,7 @@ export default function Home() {
     setSelectedTimeRange('all');
   };
 
-  // Lọc đa tiêu chí
+  // Bộ lọc danh sách món ăn
   const filteredRecipes = recipes.filter((item) => {
     const matchSearch =
       item.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -335,7 +388,7 @@ export default function Home() {
     selectedDifficulty !== 'all' ||
     selectedTimeRange !== 'all';
 
-  // Hiển thị tên tài khoản (tự động nhận diện số điện thoại hoặc email)
+  // Hiển thị tên hiển thị của tài khoản
   const getUserDisplayName = () => {
     if (!user) return '';
     const email = user.email || '';
@@ -347,7 +400,7 @@ export default function Home() {
 
   return (
     <div className="container">
-      {/* Header tích hợp trạng thái Đăng nhập / Đăng xuất */}
+      {/* Header: Logo, Trạng thái User và Nút Bếp Gia Đình */}
       <header
         style={{
           display: 'flex',
@@ -359,9 +412,30 @@ export default function Home() {
         }}
       >
         <h1 style={{ margin: 0 }}>🍳 Bếp Nhà Món Ngon</h1>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {user ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <>
+              {/* Nút Bếp gia đình */}
+              <button
+                onClick={() => setIsKitchenOpen(true)}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid #e67e22',
+                  background: kitchenData?.kitchen ? '#fffaf0' : '#fff',
+                  color: '#e67e22',
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  fontWeight: '700',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                🏡 {kitchenData?.kitchen ? kitchenData.kitchen.name : 'Vào Bếp gia đình'}
+              </button>
+
+              {/* Thông tin tài khoản */}
               <span
                 style={{
                   fontSize: '0.85rem',
@@ -374,10 +448,13 @@ export default function Home() {
               >
                 👤 {getUserDisplayName()}
               </span>
+
+              {/* Nút Đăng xuất */}
               <button
                 onClick={async () => {
                   await supabase.auth.signOut();
                   setUser(null);
+                  setKitchenData(null);
                   alert('Đã đăng xuất!');
                 }}
                 style={{
@@ -392,7 +469,7 @@ export default function Home() {
               >
                 Đăng xuất
               </button>
-            </div>
+            </>
           ) : (
             <button
               onClick={() => setIsAuthOpen(true)}
@@ -594,12 +671,12 @@ export default function Home() {
         </div>
       )}
 
-      {/* Nút Giỏ đi chợ */}
+      {/* Nút Giỏ đi chợ nổi */}
       <button className="cart-floating-btn" onClick={() => setIsCartOpen(true)}>
         🛒 Giỏ đi chợ <span className="badge">{shoppingList.length}</span>
       </button>
 
-      {/* Các Modals */}
+      {/* Chi tiết món ăn */}
       <RecipeDetailModal
         recipe={activeRecipe}
         servings={servings}
@@ -617,6 +694,7 @@ export default function Home() {
         }}
       />
 
+      {/* Chế độ nấu ăn tập trung (Cook Mode + Wake Lock + Bấm giờ) */}
       <CookModeModal
         recipe={cookModeRecipe}
         step={cookStep}
@@ -632,6 +710,7 @@ export default function Home() {
         }}
       />
 
+      {/* Giỏ đi chợ & Dự toán chi phí */}
       <CartModal
         isOpen={isCartOpen}
         shoppingList={shoppingList}
@@ -646,7 +725,15 @@ export default function Home() {
         }}
         onClearCart={async () => {
           try {
-            await fetch('/api/shopping-list', { method: 'DELETE' });
+            const params = new URLSearchParams();
+            if (kitchenData?.kitchen?.id) {
+              params.set('kitchenId', kitchenData.kitchen.id);
+            } else if (user?.id) {
+              params.set('userId', user.id);
+            }
+            const qStr = params.toString() ? `?${params.toString()}` : '';
+
+            await fetch(`/api/shopping-list${qStr}`, { method: 'DELETE' });
             setShoppingList([]);
           } catch (err) {
             alert('Lỗi khi dọn giỏ: ' + err.message);
@@ -654,12 +741,14 @@ export default function Home() {
         }}
       />
 
+      {/* Thêm công thức */}
       <AddRecipeModal
         isOpen={isAddOpen}
         onClose={() => setIsAddOpen(false)}
         onRecipeAdded={handleRecipeAdded}
       />
 
+      {/* Sửa công thức */}
       <EditRecipeModal
         isOpen={!!editRecipe}
         recipe={editRecipe}
@@ -667,6 +756,7 @@ export default function Home() {
         onRecipeUpdated={handleRecipeUpdated}
       />
 
+      {/* Hôm nay ăn gì */}
       <RandomMealModal
         isOpen={isRandomOpen}
         recipes={recipes}
@@ -674,6 +764,7 @@ export default function Home() {
         onOpenDetail={openDetail}
       />
 
+      {/* Dọn tủ lạnh */}
       <FridgeCleanerModal
         isOpen={isFridgeOpen}
         recipes={recipes}
@@ -682,6 +773,7 @@ export default function Home() {
         onAddMissingToCart={handleAddMissingToCart}
       />
 
+      {/* Lên lịch tuần */}
       <MealPlannerModal
         isOpen={isPlannerOpen}
         recipes={recipes}
@@ -690,10 +782,20 @@ export default function Home() {
         onAddPlanToCart={handleAddPlanToCart}
       />
 
+      {/* Đăng nhập / Đăng ký */}
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onAuthSuccess={(loggedUser) => setUser(loggedUser)}
+      />
+
+      {/* Bếp Gia Đình */}
+      <FamilyKitchenModal
+        isOpen={isKitchenOpen}
+        onClose={() => setIsKitchenOpen(false)}
+        kitchenData={kitchenData}
+        currentUserId={user?.id}
+        onRefreshKitchen={() => fetchKitchen(user?.id)}
       />
     </div>
   );
