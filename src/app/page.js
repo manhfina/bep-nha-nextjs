@@ -11,12 +11,17 @@ import EditRecipeModal from '../components/EditRecipeModal';
 import RandomMealModal from '../components/RandomMealModal';
 import FridgeCleanerModal from '../components/FridgeCleanerModal';
 import MealPlannerModal from '../components/MealPlannerModal';
+import AuthModal from '../components/AuthModal';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState([]);
   const [shoppingList, setShoppingList] = useState([]);
+
+  // Auth state
+  const [user, setUser] = useState(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,6 +77,18 @@ export default function Home() {
   useEffect(() => {
     fetchRecipes();
 
+    // Kiểm tra phiên đăng nhập hiện tại
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    // Lắng nghe thay đổi trạng thái đăng nhập / đăng xuất
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
     // Tải favorites từ API Supabase
     fetch('/api/favorites')
       .then((res) => res.json())
@@ -116,6 +133,7 @@ export default function Home() {
       .subscribe();
 
     return () => {
+      subscription.unsubscribe();
       supabase.removeChannel(channel);
     };
   }, []);
@@ -324,8 +342,71 @@ export default function Home() {
 
   return (
     <div className="container">
-      <header>
-        <h1>🍳 Bếp Nhà Món Ngon</h1>
+      {/* Header tích hợp trạng thái Đăng nhập / Đăng xuất */}
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          marginBottom: '15px',
+        }}
+      >
+        <h1 style={{ margin: 0 }}>🍳 Bếp Nhà Món Ngon</h1>
+        <div>
+          {user ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  color: '#2d3436',
+                  fontWeight: '600',
+                  background: '#f1f2f6',
+                  padding: '6px 12px',
+                  borderRadius: '10px',
+                }}
+              >
+                👤 {user.email?.split('@')[0]}
+              </span>
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  setUser(null);
+                  alert('Đã đăng xuất!');
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid #ddd',
+                  background: '#fff',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                }}
+              >
+                Đăng xuất
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsAuthOpen(true)}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '10px',
+                border: 'none',
+                background: '#2d3436',
+                color: '#fff',
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                fontWeight: '700',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              }}
+            >
+              🔑 Đăng nhập
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Thanh tìm kiếm, Random, Dọn tủ lạnh, Lịch tuần và Tabs */}
@@ -602,6 +683,12 @@ export default function Home() {
         onClose={() => setIsPlannerOpen(false)}
         onOpenDetail={openDetail}
         onAddPlanToCart={handleAddPlanToCart}
+      />
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onAuthSuccess={(loggedUser) => setUser(loggedUser)}
       />
     </div>
   );
