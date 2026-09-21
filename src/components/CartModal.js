@@ -2,35 +2,68 @@
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 
-// Bảng giá ước tính mặc định thị trường (VNĐ)
-const DEFAULT_PRICE_MAP = {
-  'trứng': 3500,
-  'thịt bò': 35000,
-  'thịt heo': 20000,
-  'thịt lợn': 20000,
-  'thịt gà': 15000,
-  'cà chua': 4000,
-  'cần tây': 5000,
-  'hành lá': 2000,
-  'tỏi': 3000,
-  'đậu phụ': 5000,
-  'cà rốt': 4000,
-  'khoai tây': 5000,
-  'nấm': 12000,
-  'nước mắm': 5000,
-  'dầu hào': 4000,
-  'hạt tiêu': 2000,
-  'đường': 1000,
+// Đơn giá tham khảo mặc định trên 1 đơn vị tính (VNĐ)
+const DEFAULT_UNIT_PRICES = {
+  'trứng': 3500,     // 3.500đ / quả
+  'thịt bò': 300,    // 300đ / gram (30.000đ / lạng)
+  'thịt heo': 180,   // 180đ / gram (18.000đ / lạng)
+  'thịt lợn': 180,
+  'thịt gà': 120,    // 120đ / gram
+  'cà chua': 4000,   // 4.000đ / quả hoặc củ
+  'cần tây': 50,     // 50đ / gram
+  'hành lá': 2000,   // 2.000đ / nhánh, cây
+  'tỏi': 1500,       // 1.500đ / tép
+  'đậu phụ': 4000,   // 4.000đ / bìa, miếng
+  'cà rốt': 5000,    // 5.000đ / củ
+  'khoai tây': 6000, // 6.000đ / củ
+  'nấm': 80,         // 80đ / gram
+  'mì': 5000,        // 5.000đ / vắt, gói
+  'dầu ăn': 2000,
+  'nước mắm': 2000,
+  'dầu hào': 2000,
+  'tiêu': 1000,
   'ớt': 1000,
 };
 
-// Hàm đoán giá ước tính dựa vào tên nguyên liệu
-const guessInitialPrice = (name) => {
-  const lower = name.toLowerCase();
-  for (const [key, price] of Object.entries(DEFAULT_PRICE_MAP)) {
-    if (lower.includes(key)) return price;
+// Hàm phân tích chuỗi nguyên liệu để trích xuất { name, quantity, unit }
+const parseIngredient = (rawText = '') => {
+  let name = rawText.trim();
+  let quantity = 1;
+  let unit = '';
+
+  // Xử lý dạng: "Tên nguyên liệu: 300 gram" hoặc "Tên (3 quả)"
+  if (rawText.includes(':')) {
+    const parts = rawText.split(':');
+    name = parts[0].trim();
+    const rightPart = parts.slice(1).join(':').trim();
+    const match = rightPart.match(/^([\d.,]+)\s*(.*)$/);
+    if (match) {
+      quantity = parseFloat(match[1].replace(',', '.')) || 1;
+      unit = match[2].trim();
+    }
+  } else {
+    // Thử bắt các mẫu như "300g thịt bò" hoặc "3 quả trứng"
+    const match = rawText.match(/^([\d.,]+)\s*([a-zA-Zà-ỹÀ-Ỹ]+)?\s+(.+)$/);
+    if (match) {
+      quantity = parseFloat(match[1].replace(',', '.')) || 1;
+      unit = (match[2] || '').trim();
+      name = match[3].trim();
+    }
   }
-  return 10000; // Giá mặc định nếu chưa biết nguyên liệu
+
+  return {
+    name: name.charAt(0).toUpperCase() + name.slice(1),
+    cleanKey: name.toLowerCase(),
+    quantity: Math.max(0.1, quantity),
+    unit: unit || 'phần',
+  };
+};
+
+const guessUnitPrice = (cleanKey) => {
+  for (const [key, price] of Object.entries(DEFAULT_UNIT_PRICES)) {
+    if (cleanKey.includes(key)) return price;
+  }
+  return 5000; // Giá fallback mặc định
 };
 
 export default function CartModal({
@@ -42,13 +75,12 @@ export default function CartModal({
 }) {
   const [viewMode, setViewMode] = useState('merged'); // 'merged' hoặc 'byDish'
   const [checkedItems, setCheckedItems] = useState({});
-  const [customPrices, setCustomPrices] = useState({});
+  const [customUnitPrices, setCustomUnitPrices] = useState({});
 
-  // Nạp đơn giá người dùng từng lưu trước đó từ localStorage
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('bepnha_item_prices');
-      if (saved) setCustomPrices(JSON.parse(saved));
+      const saved = localStorage.getItem('bepnha_unit_prices');
+      if (saved) setCustomUnitPrices(JSON.parse(saved));
     } catch (e) {
       console.error(e);
     }
@@ -63,34 +95,38 @@ export default function CartModal({
     }));
   };
 
-  // Cập nhật giá tùy chỉnh cho từng nguyên liệu
-  const handlePriceChange = (nameKey, newPrice) => {
-    const numeric = parseInt(newPrice) || 0;
-    const updated = { ...customPrices, [nameKey]: numeric };
-    setCustomPrices(updated);
+  const handleUnitPriceChange = (key, val) => {
+    const numeric = parseInt(val, 10) || 0;
+    const updated = { ...customUnitPrices, [key]: numeric };
+    setCustomUnitPrices(updated);
     try {
-      localStorage.setItem('bepnha_item_prices', JSON.stringify(updated));
+      localStorage.setItem('bepnha_unit_prices', JSON.stringify(updated));
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Gom nhóm nguyên liệu trùng tên
+  const getUnitPrice = (key) => {
+    if (customUnitPrices[key] !== undefined) return customUnitPrices[key];
+    return guessUnitPrice(key);
+  };
+
+  // Gom nhóm và cộng dồn số lượng toán học
   const mergedList = shoppingList.reduce((acc, item) => {
-    const rawText = (item.text || '').trim();
-    const namePart = rawText.includes(':') ? rawText.split(':')[0].trim() : rawText;
-    const key = namePart.toLowerCase();
+    const parsed = parseIngredient(item.text);
+    const key = parsed.cleanKey;
 
     if (!acc[key]) {
       acc[key] = {
-        name: namePart,
+        name: parsed.name,
         key: key,
-        details: [rawText],
+        totalQuantity: parsed.quantity,
+        unit: parsed.unit,
         dishes: [item.dish],
         ids: [item.id],
       };
     } else {
-      acc[key].details.push(rawText);
+      acc[key].totalQuantity = Math.round((acc[key].totalQuantity + parsed.quantity) * 100) / 100;
       if (!acc[key].dishes.includes(item.dish)) {
         acc[key].dishes.push(item.dish);
       }
@@ -101,121 +137,133 @@ export default function CartModal({
 
   const mergedItems = Object.values(mergedList);
 
-  // Tính giá của từng mục
-  const getItemPrice = (nameKey) => {
-    if (customPrices[nameKey] !== undefined) return customPrices[nameKey];
-    return guessInitialPrice(nameKey);
-  };
-
-  // Tổng chi phí dự kiến
+  // Tính tổng chi phí = Tổng (Số lượng x Đơn vị giá)
   const totalCost = (viewMode === 'merged' ? mergedItems : shoppingList).reduce((sum, item) => {
-    const key = (viewMode === 'merged' ? item.name : item.text.split(':')[0]).toLowerCase();
-    return sum + getItemPrice(key);
+    if (viewMode === 'merged') {
+      const uPrice = getUnitPrice(item.key);
+      return sum + Math.round(item.totalQuantity * uPrice);
+    } else {
+      const parsed = parseIngredient(item.text);
+      const uPrice = getUnitPrice(parsed.cleanKey);
+      return sum + Math.round(parsed.quantity * uPrice);
+    }
   }, 0);
 
-  // 1. Sao chép tin nhắn gửi Zalo kèm dự toán chi phí
+  // 1. Sao chép tin nhắn Zalo kèm định lượng và đơn giá chuẩn
   const handleCopyForZalo = () => {
     if (shoppingList.length === 0) return;
 
-    let textToSend = '🛒 DANH SÁCH & CHI PHÍ ĐI CHỢ:\n';
+    let textToSend = '🛒 DANH SÁCH & DỰ TOÁN ĐI CHỢ:\n';
     textToSend += '────────────────────\n';
 
     if (viewMode === 'merged') {
       mergedItems.forEach((item, index) => {
-        const p = getItemPrice(item.key);
-        textToSend += `${index + 1}. ${item.name} (~${p.toLocaleString('vi-VN')}đ) [${item.dishes.join(', ')}]\n`;
-        if (item.details.length > 0 && item.details.some((d) => d.includes(':'))) {
-          textToSend += `   👉 ${item.details.join(' + ')}\n`;
-        }
+        const uPrice = getUnitPrice(item.key);
+        const itemTotal = Math.round(item.totalQuantity * uPrice);
+        textToSend += `${index + 1}. ${item.name}: ${item.totalQuantity} ${item.unit} (~${itemTotal.toLocaleString('vi-VN')}đ)\n`;
+        textToSend += `   👉 Dùng cho: ${item.dishes.join(', ')}\n`;
       });
     } else {
       shoppingList.forEach((item, index) => {
-        const key = item.text.split(':')[0].toLowerCase();
-        const p = getItemPrice(key);
-        textToSend += `${index + 1}. ${item.text} (~${p.toLocaleString('vi-VN')}đ) [${item.dish}]\n`;
+        const parsed = parseIngredient(item.text);
+        const uPrice = getUnitPrice(parsed.cleanKey);
+        const itemTotal = Math.round(parsed.quantity * uPrice);
+        textToSend += `${index + 1}. ${item.text} (~${itemTotal.toLocaleString('vi-VN')}đ) [${item.dish}]\n`;
       });
     }
 
     textToSend += '────────────────────\n';
-    textToSend += `💰 TỔNG CHI PHÍ DỰ KIẾN: ~${totalCost.toLocaleString('vi-VN')} VNĐ\n`;
-    textToSend += 'Nhờ bạn mua giúp mình nhé! Cảm ơn nhiều! ❤️';
+    textToSend += `💰 TỔNG TIỀN DỰ TOÁN: ~${totalCost.toLocaleString('vi-VN')} VNĐ\n`;
+    textToSend += 'Mua giúp mình nhé! Cảm ơn nhiều ❤️';
 
     navigator.clipboard
       .writeText(textToSend)
-      .then(() => alert('Đã sao chép danh sách kèm chi phí! Hãy dán vào Zalo để gửi.'))
+      .then(() => alert('Đã sao chép danh sách đi chợ! Hãy dán vào Zalo để gửi.'))
       .catch((err) => alert('Lỗi sao chép: ' + err.message));
   };
 
-  // 2. Xuất Excel kèm chi phí
+  // 2. Xuất Excel chi tiết có cột Số lượng, Đơn vị, Đơn giá, Thành tiền
   const handleExportExcel = () => {
     if (shoppingList.length === 0) return;
 
     let excelData = [];
     if (viewMode === 'merged') {
-      excelData = mergedItems.map((item, idx) => ({
-        'STT': idx + 1,
-        'Tên nguyên liệu': item.name,
-        'Chi tiết định lượng': item.details.join(' + '),
-        'Món ăn áp dụng': item.dishes.join(', '),
-        'Đơn giá dự kiến (VNĐ)': getItemPrice(item.key),
-      }));
+      excelData = mergedItems.map((item, idx) => {
+        const uPrice = getUnitPrice(item.key);
+        return {
+          'STT': idx + 1,
+          'Tên nguyên liệu': item.name,
+          'Số lượng': item.totalQuantity,
+          'Đơn vị': item.unit,
+          'Đơn giá (VNĐ)': uPrice,
+          'Thành tiền (VNĐ)': Math.round(item.totalQuantity * uPrice),
+          'Món ăn áp dụng': item.dishes.join(', '),
+        };
+      });
     } else {
       excelData = shoppingList.map((item, idx) => {
-        const key = item.text.split(':')[0].toLowerCase();
+        const parsed = parseIngredient(item.text);
+        const uPrice = getUnitPrice(parsed.cleanKey);
         return {
           'STT': idx + 1,
           'Món ăn': item.dish,
-          'Nguyên liệu & Định lượng': item.text,
-          'Đơn giá dự kiến (VNĐ)': getItemPrice(key),
+          'Nguyên liệu': parsed.name,
+          'Số lượng': parsed.quantity,
+          'Đơn vị': parsed.unit,
+          'Đơn giá (VNĐ)': uPrice,
+          'Thành tiền (VNĐ)': Math.round(parsed.quantity * uPrice),
         };
       });
     }
 
-    // Dòng tổng cộng
     excelData.push({
-      'STT': 'TỔNG CỘNG',
+      'STT': 'TỔNG',
       'Tên nguyên liệu': '',
-      'Chi tiết định lượng': '',
+      'Số lượng': '',
+      'Đơn vị': '',
+      'Đơn giá (VNĐ)': '',
+      'Thành tiền (VNĐ)': totalCost,
       'Món ăn áp dụng': '',
-      'Đơn giá dự kiến (VNĐ)': totalCost,
     });
 
     const worksheet = XLSX.utils.json_to_sheet(excelData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Chi phí đi chợ');
 
-    worksheet['!cols'] = [{ wch: 6 }, { wch: 25 }, { wch: 30 }, { wch: 25 }, { wch: 20 }];
+    worksheet['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 26 }];
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(workbook, `Chi_Phi_Di_Cho_${dateStr}.xlsx`);
   };
 
-  // 3. In kèm dự toán chi phí
+  // 3. In hóa đơn/danh sách chuẩn khổ giấy
   const handlePrint = () => {
     if (shoppingList.length === 0) return;
 
     const printWindow = window.open('', '_blank');
     const itemsHtml = (viewMode === 'merged' ? mergedItems : shoppingList)
       .map((item, idx) => {
-        const key = (viewMode === 'merged' ? item.name : item.text.split(':')[0]).toLowerCase();
-        const price = getItemPrice(key);
-
         if (viewMode === 'merged') {
+          const uPrice = getUnitPrice(item.key);
+          const itemTotal = Math.round(item.totalQuantity * uPrice);
           return `
             <tr>
               <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
               <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${item.name}</td>
-              <td style="padding: 8px; border: 1px solid #ddd;">${item.details.join(' + ')}</td>
+              <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${item.totalQuantity} ${item.unit}</td>
               <td style="padding: 8px; border: 1px solid #ddd; color: #555;">${item.dishes.join(', ')}</td>
-              <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${price.toLocaleString('vi-VN')} đ</td>
+              <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">${itemTotal.toLocaleString('vi-VN')} đ</td>
             </tr>
           `;
         }
+        const parsed = parseIngredient(item.text);
+        const uPrice = getUnitPrice(parsed.cleanKey);
+        const itemTotal = Math.round(parsed.quantity * uPrice);
         return `
           <tr>
             <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
             <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${item.dish}</td>
             <td style="padding: 8px; border: 1px solid #ddd;" colspan="2">${item.text}</td>
-            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${price.toLocaleString('vi-VN')} đ</td>
+            <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">${itemTotal.toLocaleString('vi-VN')} đ</td>
           </tr>
         `;
       })
@@ -235,22 +283,22 @@ export default function CartModal({
           </style>
         </head>
         <body>
-          <h2>🛒 DỰ TOÁN CHI PHÍ ĐI CHỢ</h2>
+          <h2>🛒 BẢNG DỰ TOÁN CHI PHÍ ĐI CHỢ</h2>
           <p class="sub">Ngày tạo: ${new Date().toLocaleDateString('vi-VN')}</p>
           <table>
             <thead>
               <tr>
                 <th style="width: 40px; text-align:center;">STT</th>
                 <th>${viewMode === 'merged' ? 'Nguyên liệu' : 'Món ăn'}</th>
-                <th>Định lượng</th>
-                <th>${viewMode === 'merged' ? 'Món áp dụng' : ''}</th>
-                <th style="text-align: right; width: 120px;">Dự toán</th>
+                <th style="text-align:center;">Định lượng</th>
+                <th>${viewMode === 'merged' ? 'Món áp dụng' : 'Chi tiết'}</th>
+                <th style="text-align:right; width: 110px;">Thành tiền</th>
               </tr>
             </thead>
             <tbody>
               ${itemsHtml}
               <tr class="total-row">
-                <td colspan="4" style="padding: 10px 8px; border: 1px solid #ddd; text-align: right;">TỔNG CỘNG DỰ KIẾN:</td>
+                <td colspan="4" style="padding: 10px 8px; border: 1px solid #ddd; text-align: right;">TỔNG CHI PHÍ:</td>
                 <td style="padding: 10px 8px; border: 1px solid #ddd; text-align: right; color: #d35400;">
                   ${totalCost.toLocaleString('vi-VN')} đ
                 </td>
@@ -276,9 +324,9 @@ export default function CartModal({
         {/* Header */}
         <div style={cartStyles.header}>
           <div>
-            <h2 style={cartStyles.title}>🛒 Giỏ đi chợ & Chi phí</h2>
+            <h2 style={cartStyles.title}>🛒 Giỏ đi chợ & Dự toán</h2>
             <span style={{ fontSize: '0.8rem', color: '#888' }}>
-              {shoppingList.length} nguyên liệu cần mua
+              Tự động cộng dồn số lượng & nhân đơn giá
             </span>
           </div>
           {shoppingList.length > 0 && (
@@ -312,7 +360,7 @@ export default function CartModal({
           </div>
         )}
 
-        {/* Danh sách */}
+        {/* Danh sách món */}
         {shoppingList.length === 0 ? (
           <div style={cartStyles.emptyState}>
             <p style={{ fontSize: '2.5rem', margin: 0 }}>🥬</p>
@@ -324,9 +372,10 @@ export default function CartModal({
           <div style={cartStyles.list}>
             {viewMode === 'merged'
               ? mergedItems.map((item) => {
-                  const itemKey = `merged-${item.name}`;
+                  const itemKey = `merged-${item.key}`;
                   const isDone = !!checkedItems[itemKey];
-                  const currentPrice = getItemPrice(item.key);
+                  const uPrice = getUnitPrice(item.key);
+                  const itemTotal = Math.round(item.totalQuantity * uPrice);
 
                   return (
                     <div
@@ -345,37 +394,42 @@ export default function CartModal({
                         style={{ cursor: 'pointer', transform: 'scale(1.15)', marginRight: '10px' }}
                       />
                       <div style={{ flex: 1 }}>
-                        <span
-                          style={{
-                            ...cartStyles.itemText,
-                            fontWeight: '600',
-                            textDecoration: isDone ? 'line-through' : 'none',
-                          }}
-                        >
-                          {item.name}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span
+                            style={{
+                              ...cartStyles.itemText,
+                              fontWeight: '700',
+                              textDecoration: isDone ? 'line-through' : 'none',
+                            }}
+                          >
+                            {item.name}
+                          </span>
+                          <span style={cartStyles.qtyBadge}>
+                            {item.totalQuantity} {item.unit}
+                          </span>
+                        </div>
                         <span style={cartStyles.dishName}>Dùng cho: {item.dishes.join(', ')}</span>
-                        {item.details.length > 1 && (
-                          <p style={{ margin: '3px 0 0 0', fontSize: '0.75rem', color: '#718096' }}>
-                            {item.details.join(' + ')}
-                          </p>
-                        )}
                       </div>
 
-                      {/* Ô nhập giá ước tính */}
+                      {/* Cột chỉnh đơn vị giá & xem thành tiền */}
                       <div
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <input
-                          type="number"
-                          step="1000"
-                          value={currentPrice}
-                          onChange={(e) => handlePriceChange(item.key, e.target.value)}
-                          style={cartStyles.priceInput}
-                          title="Bấm để sửa đơn giá ước tính"
-                        />
-                        <span style={{ fontSize: '0.75rem', color: '#888' }}>đ</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <input
+                            type="number"
+                            step="500"
+                            value={uPrice}
+                            onChange={(e) => handleUnitPriceChange(item.key, e.target.value)}
+                            style={cartStyles.priceInput}
+                            title={`Đơn giá cho mỗi ${item.unit}`}
+                          />
+                          <span style={{ fontSize: '0.7rem', color: '#718096' }}>đ/{item.unit}</span>
+                        </div>
+                        <span style={cartStyles.totalItemPrice}>
+                          ~{itemTotal.toLocaleString('vi-VN')} đ
+                        </span>
                       </div>
                     </div>
                   );
@@ -383,8 +437,9 @@ export default function CartModal({
               : shoppingList.map((item) => {
                   const itemKey = `single-${item.id}`;
                   const isDone = !!checkedItems[itemKey];
-                  const rawKey = item.text.split(':')[0].toLowerCase();
-                  const currentPrice = getItemPrice(rawKey);
+                  const parsed = parseIngredient(item.text);
+                  const uPrice = getUnitPrice(parsed.cleanKey);
+                  const itemTotal = Math.round(parsed.quantity * uPrice);
 
                   return (
                     <div
@@ -415,18 +470,15 @@ export default function CartModal({
                       </div>
 
                       <div
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px', marginRight: '6px' }}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', marginRight: '6px' }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <input
-                          type="number"
-                          step="1000"
-                          value={currentPrice}
-                          onChange={(e) => handlePriceChange(rawKey, e.target.value)}
-                          style={cartStyles.priceInput}
-                          title="Bấm để sửa đơn giá ước tính"
-                        />
-                        <span style={{ fontSize: '0.75rem', color: '#888' }}>đ</span>
+                        <span style={cartStyles.totalItemPrice}>
+                          ~{itemTotal.toLocaleString('vi-VN')} đ
+                        </span>
+                        <span style={{ fontSize: '0.68rem', color: '#a0aec0' }}>
+                          ({uPrice.toLocaleString('vi-VN')}đ/{parsed.unit})
+                        </span>
                       </div>
 
                       <button
@@ -435,7 +487,7 @@ export default function CartModal({
                           onRemoveItem(item.id);
                         }}
                         style={cartStyles.btnDelete}
-                        title="Xóa món này"
+                        title="Xóa mục này"
                       >
                         ✕
                       </button>
@@ -445,21 +497,20 @@ export default function CartModal({
           </div>
         )}
 
-        {/* Thanh tổng kết ngân sách & Hành động */}
+        {/* Tổng kết chi phí & Các nút hành động */}
         {shoppingList.length > 0 && (
           <div style={cartStyles.footer}>
-            {/* Box tổng tiền */}
             <div style={cartStyles.totalBox}>
-              <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: '500' }}>
-                Tổng dự kiến:
+              <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: '600' }}>
+                Tổng tiền ước tính:
               </span>
-              <span style={{ fontSize: '1.25rem', color: '#e67e22', fontWeight: '800' }}>
+              <span style={{ fontSize: '1.3rem', color: '#e67e22', fontWeight: '800' }}>
                 ~{totalCost.toLocaleString('vi-VN')} <span style={{ fontSize: '0.85rem' }}>VNĐ</span>
               </span>
             </div>
 
             <button onClick={handleCopyForZalo} style={cartStyles.btnZalo}>
-              📲 Gửi Zalo kèm dự toán
+              📲 Gửi Zalo kèm bảng tính
             </button>
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
               <button onClick={handleExportExcel} style={cartStyles.btnExcel}>
@@ -488,7 +539,7 @@ const cartStyles = {
   modal: {
     backgroundColor: '#fff',
     borderRadius: '24px',
-    maxWidth: '520px',
+    maxWidth: '540px',
     width: '100%',
     maxHeight: '88vh',
     display: 'flex',
@@ -547,15 +598,28 @@ const cartStyles = {
   itemText: {
     margin: '2px 0 0 0', fontSize: '0.9rem', color: '#2d3436', fontWeight: '500',
   },
+  qtyBadge: {
+    backgroundColor: '#ebf8ff',
+    color: '#3182ce',
+    fontSize: '0.75rem',
+    fontWeight: '700',
+    padding: '2px 8px',
+    borderRadius: '6px',
+  },
   priceInput: {
-    width: '68px',
-    padding: '4px 6px',
+    width: '60px',
+    padding: '3px 5px',
     borderRadius: '6px',
     border: '1px solid #cbd5e0',
-    fontSize: '0.8rem',
+    fontSize: '0.75rem',
     textAlign: 'right',
     outline: 'none',
     fontWeight: '600',
+    color: '#2d3436',
+  },
+  totalItemPrice: {
+    fontSize: '0.85rem',
+    fontWeight: '700',
     color: '#2d3436',
   },
   btnDelete: {
@@ -569,10 +633,10 @@ const cartStyles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '8px 12px',
+    padding: '10px 14px',
     backgroundColor: '#fffaf0',
     border: '1px solid #feebc8',
-    borderRadius: '10px',
+    borderRadius: '12px',
     marginBottom: '10px',
   },
   btnZalo: {
