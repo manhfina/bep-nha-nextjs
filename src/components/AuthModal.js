@@ -15,14 +15,13 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
 
   if (!isOpen) return null;
 
-  // Chuẩn hóa số điện thoại về định dạng auth
   const getIdentifier = () => {
     if (authMethod === 'phone') {
       const cleanPhone = phone.trim().replace(/\D/g, '');
       if (cleanPhone.length < 9 || cleanPhone.length > 11) {
         throw new Error('Số điện thoại không hợp lệ (cần từ 9 - 11 chữ số)');
       }
-      return `${cleanPhone}@phone.bepnha.local`;
+      return `${cleanPhone}@phone.bepnha.com`;
     }
     return email.trim().toLowerCase();
   };
@@ -47,7 +46,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           },
         });
         if (error) throw error;
-        alert('🎉 Đăng ký thành công! Bạn có thể sử dụng ngay.');
+        alert('🎉 Đăng ký tài khoản thành công!');
         if (onAuthSuccess) onAuthSuccess(data.user);
         onClose();
       } else {
@@ -86,7 +85,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           </p>
         </div>
 
-        {/* Tab chuyển đổi Số điện thoại / Email */}
+        {/* Tab chuyển đổi */}
         <div style={styles.tabContainer}>
           <button
             type="button"

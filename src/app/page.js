@@ -339,8 +339,8 @@ export default function Home() {
   const getUserDisplayName = () => {
     if (!user) return '';
     const email = user.email || '';
-    if (email.includes('@phone.bepnha.local')) {
-      return email.replace('@phone.bepnha.local', '');
+    if (email.includes('@phone.bepnha.com')) {
+      return email.replace('@phone.bepnha.com', '');
     }
     return email.split('@')[0];
   };
