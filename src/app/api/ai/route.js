@@ -31,7 +31,6 @@ async function callGemini(promptText) {
   let lastError = null;
 
   for (const model of CANDIDATE_MODELS) {
-    // URL thuần túy, tuyệt đối không dính ký tự Markdown hay template literal lỗi
     const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)' + model + ':generateContent';
 
     const payload = {
@@ -61,7 +60,7 @@ async function callGemini(promptText) {
       const resText = await res.text();
 
       if (!res.ok) {
-        lastError = new Error(`Google API ${res.status}: ${resText}`);
+        lastError = new Error('Google API (' + res.status + '): ' + resText);
         continue;
       }
 
