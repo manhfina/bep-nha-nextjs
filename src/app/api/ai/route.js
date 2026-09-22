@@ -5,17 +5,14 @@ const apiKey = process.env.GEMINI_API_KEY;
 // Danh sách các model chính thức theo thứ tự ưu tiên
 const CANDIDATE_MODELS = [
   'gemini-2.5-flash',
-  'gemini-2.5-pro',
+  'gemini-3.8-flash',
 ];
 
-// Hàm bóc tách JSON an toàn từ phản hồi của AI
 function extractJsonFromText(rawText) {
   if (!rawText) return null;
   let cleaned = rawText.trim();
-  // Loại bỏ các khối code markdown ```json ... ```
   cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
 
-  // Tìm khối JSON hợp lệ từ { đến }
   const firstBrace = cleaned.indexOf('{');
   const lastBrace = cleaned.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1) {
@@ -26,7 +23,6 @@ function extractJsonFromText(rawText) {
     }
   }
 
-  // Nếu là mảng JSON
   const firstBracket = cleaned.indexOf('[');
   const lastBracket = cleaned.lastIndexOf(']');
   if (firstBracket !== -1 && lastBracket !== -1) {
@@ -40,10 +36,9 @@ function extractJsonFromText(rawText) {
   return JSON.parse(cleaned);
 }
 
-// Hàm gọi REST API chuẩn đến máy chủ Google Gemini
 async function callGemini(promptText) {
   if (!apiKey) {
-    throw new Error('Chưa cấu hình GEMINI_API_KEY trên Vercel Environment Variables');
+    throw new Error('Chưa cấu hình GEMINI_API_KEY trong Environment Variables');
   }
 
   let lastError = null;
@@ -67,9 +62,7 @@ async function callGemini(promptText) {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
         cache: 'no-store',
       });
@@ -79,7 +72,7 @@ async function callGemini(promptText) {
       if (!response.ok) {
         console.warn(`Model ${model} báo lỗi (${response.status}):`, responseText);
         lastError = new Error(`Google API (${response.status}): ${responseText}`);
-        continue; // Chuyển sang model tiếp theo
+        continue;
       }
 
       const jsonResult = JSON.parse(responseText);
@@ -110,7 +103,7 @@ export async function POST(request) {
       }
 
       const prompt = `
-Bạn là chuyên gia ẩm thực Việt Nam. Nhiệm vụ của bạn là đọc đoạn văn bản mô tả công thức nấu ăn bên dưới và chuyển đổi thành một đối tượng JSON hợp lệ theo đúng mẫu sau (KHÔNG dùng markdown):
+Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản mô tả công thức nấu ăn bên dưới và chuyển đổi thành một đối tượng JSON hợp lệ theo đúng mẫu sau (KHÔNG dùng markdown):
 
 {
   "title": "Tên món ăn (ngắn gọn, viết hoa chữ cái đầu)",
@@ -131,20 +124,27 @@ Bạn là chuyên gia ẩm thực Việt Nam. Nhiệm vụ của bạn là đọ
   ]
 }
 
-Quy định bóc tách:
-1. "cook_time": Chỉ trả về số nguyên (phút).
-2. "difficulty": Chọn 1 trong 4 giá trị: "Rất dễ", "Dễ", "Trung bình", "Khó".
-3. "base_servings": Mặc định là 2 nếu không nhắc tới.
-4. "ingredients": Định lượng chia theo 1 người ăn (amountPerPerson). Unit là: "g", "kg", "quả", "trái", "củ", "nhánh", "thìa canh", "thìa cà phê", v.v. Nếu là gia vị nêm nếm không rõ số lượng thì để amountPerPerson: 1, unit: "thìa canh".
-5. "steps": Danh sách các bước dạng chuỗi tuần tự.
+Quy định:
+1. "title": Bắt buộc phải có tên món ăn rõ ràng.
+2. "cook_time": Số nguyên phút.
+3. "difficulty": Một trong bốn giá trị: "Rất dễ", "Dễ", "Trung bình", "Khó".
+4. "base_servings": Mặc định là 2 nếu không nhắc tới.
+5. "ingredients": Mảng đối tượng nguyên liệu có name, amountPerPerson, unit.
+6. "steps": Danh sách mảng các bước nấu dạng chuỗi.
 
-Văn bản cần bóc tách:
+Văn bản:
 """
 ${text}
 """`;
 
       const recipeData = await callGemini(prompt);
-      return NextResponse.json({ success: true, data: recipeData });
+      
+      // ĐẢM BẢO TRẢ VỀ CẢ CẤP NGOÀI VÀ CẤP CON ĐỂ FRONTEND LUÔN ĐỌC ĐƯỢC
+      return NextResponse.json({
+        success: true,
+        data: recipeData,
+        ...recipeData, // Trải phẳng trực tiếp { title, desc, cook_time, ingredients, steps }
+      });
     }
 
     // 2. ACTION: Quét ảnh tủ lạnh hoặc hóa đơn
@@ -168,7 +168,7 @@ ${text}
                 },
               },
               {
-                text: 'Hãy nhận diện các nguyên liệu nấu ăn trong ảnh. Trả về JSON mảng gồm các đối tượng: [{"name": "tên thực phẩm", "quantity": 1, "unit": "kg"}]',
+                text: 'Hãy nhận diện các nguyên liệu nấu ăn trong ảnh. Trả về JSON mảng: [{"name": "tên thực phẩm", "quantity": 1, "unit": "kg"}]',
               },
             ],
           },
@@ -197,7 +197,7 @@ ${text}
     console.error('Lỗi API /api/ai:', err.message);
     return NextResponse.json(
       { error: err.message || 'Không thể xử lý dữ liệu AI' },
-      { status: 200 } // Trả về 200 kèm key error để frontend hiển thị thông báo thay vì sập lỗi 500
+      { status: 500 }
     );
   }
 }
