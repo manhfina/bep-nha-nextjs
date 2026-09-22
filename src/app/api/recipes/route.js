@@ -8,19 +8,18 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 /**
- * Hàm kiểm tra quyền thực hiện thao tác sửa / xóa
+ * Kiểm tra quyền thực hiện sửa / xóa
  */
 async function verifyPermission(phone) {
   if (!phone) return false;
-
   const cleanPhone = phone.trim();
 
-  // 1. Kiểm tra nếu là 1 trong 2 số Admin chính
+  // 1. Kiểm tra nếu là 1 trong 2 số Admin tối cao
   if (ROOT_ADMIN_PHONES.includes(cleanPhone)) {
     return true;
   }
 
-  // 2. Tra cứu quyền trong bảng user_roles trên Supabase
+  // 2. Tra cứu trong bảng user_roles
   const { data, error } = await supabase
     .from('user_roles')
     .select('role')
@@ -28,11 +27,10 @@ async function verifyPermission(phone) {
     .maybeSingle();
 
   if (error || !data) return false;
-
   return data.role === 'admin' || data.role === 'editor';
 }
 
-// GET: Lấy danh sách công thức món ăn (Công khai cho mọi người)
+// GET: Lấy danh sách công thức
 export async function GET() {
   try {
     const { data, error } = await supabase
@@ -41,27 +39,27 @@ export async function GET() {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Lỗi Supabase:', error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-
     return NextResponse.json(data);
   } catch (err) {
-    console.error('Lỗi Server:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// POST: Đăng công thức mới
+// POST: Thêm món ăn mới
 export async function POST(request) {
   try {
     const body = await request.json();
+    const { requesterPhone, ...insertData } = body;
+
     const { data, error } = await supabase
       .from('recipes')
-      .insert([body])
+      .insert([insertData])
       .select();
 
     if (error) {
+      console.error('Lỗi Supabase POST:', error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
@@ -71,14 +69,13 @@ export async function POST(request) {
   }
 }
 
-// DELETE: Xóa công thức (Bắt buộc quyền Admin hoặc Editor)
+// DELETE: Xóa công thức
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     const requesterPhone = request.headers.get('x-user-phone') || searchParams.get('phone');
 
-    // Kiểm tra quyền
     const hasPermission = await verifyPermission(requesterPhone);
     if (!hasPermission) {
       return NextResponse.json(
@@ -106,11 +103,13 @@ export async function DELETE(request) {
   }
 }
 
-// PUT: Cập nhật công thức món ăn (Bắt buộc quyền Admin hoặc Editor)
+// PUT: Cập nhật công thức món ăn
 export async function PUT(request) {
   try {
     const body = await request.json();
-    const { id, requesterPhone: bodyPhone, ...updateData } = body;
+    
+    // TÁCH requesterPhone RA ĐỂ KHÔNG BỊ TRUYỀN VÀO BẢNG RECIPES
+    const { id, requesterPhone: bodyPhone, ...rawUpdateData } = body;
     const requesterPhone = request.headers.get('x-user-phone') || bodyPhone;
 
     // Kiểm tra quyền
@@ -126,18 +125,34 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Thiếu ID món ăn cần cập nhật' }, { status: 400 });
     }
 
+    // Làm sạch payload: Chỉ gửi các trường hợp lệ lên Supabase
+    const sanitizedUpdate = {};
+    if (rawUpdateData.title !== undefined) sanitizedUpdate.title = rawUpdateData.title;
+    if (rawUpdateData.desc !== undefined) sanitizedUpdate.desc = rawUpdateData.desc;
+    if (rawUpdateData.description !== undefined) sanitizedUpdate.description = rawUpdateData.description;
+    if (rawUpdateData.time !== undefined) sanitizedUpdate.time = rawUpdateData.time;
+    if (rawUpdateData.cook_time !== undefined) sanitizedUpdate.cook_time = rawUpdateData.cook_time;
+    if (rawUpdateData.difficulty !== undefined) sanitizedUpdate.difficulty = rawUpdateData.difficulty;
+    if (rawUpdateData.image !== undefined) sanitizedUpdate.image = rawUpdateData.image;
+    if (rawUpdateData.image_url !== undefined) sanitizedUpdate.image_url = rawUpdateData.image_url;
+    if (rawUpdateData.ingredients !== undefined) sanitizedUpdate.ingredients = rawUpdateData.ingredients;
+    if (rawUpdateData.steps !== undefined) sanitizedUpdate.steps = rawUpdateData.steps;
+    if (rawUpdateData.instructions !== undefined) sanitizedUpdate.instructions = rawUpdateData.instructions;
+
     const { data, error } = await supabase
       .from('recipes')
-      .update(updateData)
+      .update(sanitizedUpdate)
       .eq('id', id)
       .select();
 
     if (error) {
+      console.error('Lỗi Supabase PUT:', error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json(data[0]);
   } catch (err) {
+    console.error('Lỗi Server PUT:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

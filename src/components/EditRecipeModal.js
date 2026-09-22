@@ -30,21 +30,30 @@ export default function EditRecipeModal({
   useEffect(() => {
     if (recipe) {
       const ingText = (recipe.ingredients || [])
-        .map((ing) => (typeof ing === 'string' ? ing : ing.name))
+        .map((ing) => {
+          if (typeof ing === 'string') return ing;
+          return ing.name || '';
+        })
+        .filter(Boolean)
         .join('\n');
-      const stepText = (recipe.steps || []).join('\n');
-      const parsedTime = parseInt(recipe.time) || 15;
+
+      const stepText = (recipe.steps || recipe.instructions || [])
+        .filter(Boolean)
+        .join('\n');
+
+      const parsedTime = parseInt(recipe.time) || parseInt(recipe.cook_time) || 15;
+      const initialImg = recipe.image || recipe.image_url || '';
 
       setFormData({
         title: recipe.title || '',
-        description: recipe.desc || '',
+        description: recipe.desc || recipe.description || '',
         cook_time: parsedTime,
         difficulty: recipe.difficulty || 'Dễ',
-        image_url: recipe.image || '',
+        image_url: initialImg,
         ingredients: ingText,
         instructions: stepText,
       });
-      setPreviewImage(recipe.image || '');
+      setPreviewImage(initialImg);
     }
   }, [recipe]);
 
@@ -59,6 +68,7 @@ export default function EditRecipeModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Tạo link tạm thời để preview nhanh
     setPreviewImage(URL.createObjectURL(file));
     setUploading(true);
 
@@ -77,7 +87,9 @@ export default function EditRecipeModal({
         .from('recipes')
         .getPublicUrl(filePath);
 
-      setFormData((prev) => ({ ...prev, image_url: publicData.publicUrl }));
+      const uploadedUrl = publicData.publicUrl;
+      setFormData((prev) => ({ ...prev, image_url: uploadedUrl }));
+      setPreviewImage(uploadedUrl);
     } catch (err) {
       alert('Lỗi tải ảnh: ' + err.message);
     } finally {
@@ -90,28 +102,40 @@ export default function EditRecipeModal({
     setLoading(true);
 
     try {
+      // 1. Chuẩn hóa danh sách nguyên liệu
       const ingredientsArray = formData.ingredients
         .split('\n')
         .map((item) => item.trim())
         .filter(Boolean)
-        .map((line) => ({ name: line, amountPerPerson: 1, unit: '' }));
+        .map((line) => ({
+          name: line,
+          amountPerPerson: 1,
+          unit: '',
+        }));
 
+      // 2. Chuẩn hóa danh sách các bước nấu
       const instructionsArray = formData.instructions
         .split('\n')
         .map((item) => item.trim())
         .filter(Boolean);
 
-      const phone = extractUserPhone(currentUser);
+      const phone = extractUserPhone(currentUser) || '';
+      const finalImage = formData.image_url || previewImage || '';
 
+      // 3. Đóng gói payload sạch sẽ (đảm bảo 100% JSON serializable)
       const payload = {
         id: recipe.id,
-        title: formData.title,
-        desc: formData.description,
-        time: `${formData.cook_time} phút`,
-        difficulty: formData.difficulty,
-        image: formData.image_url,
+        title: String(formData.title || '').trim(),
+        desc: String(formData.description || '').trim(),
+        description: String(formData.description || '').trim(),
+        time: `${formData.cook_time || 15} phút`,
+        cook_time: Number(formData.cook_time) || 15,
+        difficulty: formData.difficulty || 'Dễ',
+        image: finalImage,
+        image_url: finalImage,
         ingredients: ingredientsArray,
         steps: instructionsArray,
+        instructions: instructionsArray,
         requesterPhone: phone,
       };
 
@@ -119,20 +143,20 @@ export default function EditRecipeModal({
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-phone': phone || '',
+          'x-user-phone': phone,
         },
         body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Lỗi khi cập nhật món ăn');
+        const errData = await res.json();
+        throw new Error(errData.error || 'Lỗi khi cập nhật món ăn');
       }
 
       const updated = await res.json();
       onRecipeUpdated(updated);
       onClose();
-      alert('Cập nhật công thức thành công!');
+      alert('🎉 Cập nhật công thức thành công!');
     } catch (err) {
       alert('Lỗi: ' + err.message);
     } finally {
@@ -210,7 +234,7 @@ export default function EditRecipeModal({
               <img
                 src={previewImage}
                 alt="Preview"
-                style={{ width: '100%', height: '130px', objectFit: 'cover', borderRadius: '10px', marginTop: '6px' }}
+                style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '10px', marginTop: '6px' }}
               />
             )}
           </div>
@@ -219,7 +243,7 @@ export default function EditRecipeModal({
             <label style={modalStyles.label}>Nguyên liệu (mỗi dòng 1 loại)</label>
             <textarea
               name="ingredients"
-              rows={3}
+              rows={4}
               value={formData.ingredients}
               onChange={handleChange}
               style={modalStyles.textarea}
@@ -230,7 +254,7 @@ export default function EditRecipeModal({
             <label style={modalStyles.label}>Các bước nấu (mỗi dòng 1 bước)</label>
             <textarea
               name="instructions"
-              rows={3}
+              rows={4}
               value={formData.instructions}
               onChange={handleChange}
               style={modalStyles.textarea}

@@ -5,38 +5,34 @@ const STATIC_ASSETS = [
   '/favicon.ico',
 ];
 
-// 1. Cài đặt Service Worker và cache các file tĩnh cơ bản
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
   self.skipWaiting();
 });
 
-// 2. Dọn dẹp cache cũ khi có phiên bản mới
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
+    caches.keys().then((keys) =>
+      Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
+          if (key !== CACHE_NAME) return caches.delete(key);
         })
-      );
-    })
+      )
+    )
   );
   self.clients.claim();
 });
 
-// 3. Cơ chế Network first, fallback to Cache khi mất kết nối mạng
 self.addEventListener('fetch', (event) => {
-  // Không cache các lệnh API có dữ liệu động hoặc bảo mật
+  const url = event.request.url;
+
+  // BỎ QUA các scheme không hỗ trợ (chrome-extension://) và các request không phải GET
   if (
-    event.request.url.includes('/api/roles') ||
-    event.request.url.includes('supabase.co') ||
+    !url.startsWith('http') ||
+    url.includes('/api/roles') ||
+    url.includes('supabase.co') ||
     event.request.method !== 'GET'
   ) {
     return;
@@ -55,12 +51,8 @@ self.addEventListener('fetch', (event) => {
       })
       .catch(() => {
         return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          if (event.request.mode === 'navigate') {
-            return caches.match('/');
-          }
+          if (cachedResponse) return cachedResponse;
+          if (event.request.mode === 'navigate') return caches.match('/');
         });
       })
   );
