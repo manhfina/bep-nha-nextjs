@@ -26,7 +26,7 @@ export default function EditRecipeModal({
     instructions: '',
   });
 
-  // Hàm chuyển đổi an toàn mọi định dạng dữ liệu (Array, JSON string, Object)
+  // Chuyển đổi an toàn chuỗi/mảng bất kỳ
   const safeParseArray = (raw) => {
     if (!raw) return [];
     if (Array.isArray(raw)) return raw;
@@ -43,28 +43,55 @@ export default function EditRecipeModal({
 
   useEffect(() => {
     if (recipe && isOpen) {
-      // 1. Phân tích nguyên liệu an toàn
+      const baseServings = recipe.baseServings || recipe.base_servings || 2;
+
+      // 1. Phân tích nguyên liệu & GIỮ NGUYÊN ĐƠN VỊ TÍNH
       const rawIngs = safeParseArray(recipe.ingredients);
-      const ingLines = rawIngs.map((item) => {
-        if (typeof item === 'string') return item;
-        if (typeof item === 'object' && item !== null) {
-          if (item.name && item.amount) {
-            return `${item.name}: ${item.amount} ${item.unit || ''}`.trim();
+      const ingLines = rawIngs
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (typeof item === 'object' && item !== null) {
+            const name = item.name || '';
+            const unit = item.unit || '';
+            const amount =
+              item.amount != null
+                ? item.amount
+                : item.amountPerPerson != null
+                ? item.amountPerPerson * baseServings
+                : '';
+
+            // Nếu trong tên đã chứa sẵn ": " và số thì giữ nguyên
+            if (name.includes(':') && (name.includes(unit) || !unit)) {
+              return name;
+            }
+
+            if (amount !== '' && unit !== '') {
+              return `${name}: ${amount} ${unit}`.trim();
+            }
+            if (amount !== '') {
+              return `${name}: ${amount}`.trim();
+            }
+            if (unit !== '') {
+              return `${name} (${unit})`.trim();
+            }
+            return name;
           }
-          return item.name || item.text || '';
-        }
-        return '';
-      }).filter(Boolean);
+          return '';
+        })
+        .filter(Boolean);
 
-      // 2. Phân tích các bước nấu an toàn
+      // 2. Phân tích các bước nấu
       const rawSteps = safeParseArray(recipe.steps || recipe.instructions);
-      const stepLines = rawSteps.map((item) => {
-        if (typeof item === 'string') return item;
-        if (typeof item === 'object' && item !== null) return item.step || item.text || item.description || '';
-        return '';
-      }).filter(Boolean);
+      const stepLines = rawSteps
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (typeof item === 'object' && item !== null) {
+            return item.step || item.text || item.description || '';
+          }
+          return '';
+        })
+        .filter(Boolean);
 
-      // 3. Thời gian và ảnh
       const parsedTime = parseInt(recipe.time) || parseInt(recipe.cook_time) || 15;
       const initialImg = recipe.image || recipe.image_url || '';
 
@@ -139,10 +166,54 @@ export default function EditRecipeModal({
     return '';
   };
 
+  // Hàm bóc tách thông minh dòng chữ thành { name, amountPerPerson, unit }
+  const parseIngredientLine = (line, baseServings = 2) => {
+    const trimmed = String(line).trim();
+    if (!trimmed) return null;
+
+    // Định dạng: "Cà tím: 2 quả" hoặc "Cà tím: 200 gram"
+    if (trimmed.includes(':')) {
+      const parts = trimmed.split(':');
+      const name = parts[0].trim();
+      const rest = parts.slice(1).join(':').trim();
+
+      const match = rest.match(/^([\d.,]+)\s*(.*)$/);
+      if (match) {
+        const num = parseFloat(match[1].replace(',', '.'));
+        const unit = match[2] ? match[2].trim() : '';
+        return {
+          name,
+          amountPerPerson: !isNaN(num) ? num / baseServings : 1,
+          unit: unit || 'phần',
+        };
+      }
+      return { name, amountPerPerson: 1, unit: rest || 'phần' };
+    }
+
+    // Định dạng không có dấu hai chấm: "2 quả cà tím" hoặc "500g thịt bò"
+    const regex = /^([\d.,]+)\s*(kilogram|kg|gam|gram|gr|g|lạng|quả|trái|củ|nhánh|cọng|tép|bó|mớ|miếng|hộp|chai|lít|lit|ml|thìa cà phê|muỗng cà phê|thìa canh|muỗng canh|thìa|muỗng|bát|chén)?\s*(.*)$/i;
+    const match = trimmed.match(regex);
+    if (match) {
+      const num = parseFloat(match[1].replace(',', '.'));
+      const unit = match[2] ? match[2].trim() : 'phần';
+      const name = match[3] ? match[3].trim() : trimmed;
+      return {
+        name: name || trimmed,
+        amountPerPerson: !isNaN(num) ? num / baseServings : 1,
+        unit,
+      };
+    }
+
+    return {
+      name: trimmed,
+      amountPerPerson: 1,
+      unit: '',
+    };
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Chặn vô tình lưu nếu form bị trắng tên
     if (!formData.title.trim()) {
       alert('Tên món ăn không được để trống!');
       return;
@@ -151,18 +222,15 @@ export default function EditRecipeModal({
     setLoading(true);
 
     try {
-      // Chuẩn hóa nguyên liệu
+      const baseServings = recipe.baseServings || recipe.base_servings || 2;
+
+      // 1. Phân tích nguyên liệu & GIỮ ĐẦY ĐỦ ĐƠN VỊ TÍNH (ĐVT)
       const ingredientsArray = String(formData.ingredients || '')
         .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map((line) => ({
-          name: String(line),
-          amountPerPerson: 1,
-          unit: '',
-        }));
+        .map((line) => parseIngredientLine(line, baseServings))
+        .filter(Boolean);
 
-      // Chuẩn hóa các bước nấu
+      // 2. Chuẩn hóa các bước nấu
       const instructionsArray = String(formData.instructions || '')
         .split('\n')
         .map((item) => item.trim())
@@ -184,7 +252,6 @@ export default function EditRecipeModal({
         image_url: finalImg,
         ingredients: ingredientsArray,
         steps: instructionsArray,
-        instructions: instructionsArray,
       };
 
       const res = await fetch('/api/recipes', {
@@ -204,7 +271,7 @@ export default function EditRecipeModal({
 
       onRecipeUpdated(responseData);
       onClose();
-      alert('🎉 Đã lưu thay đổi món ăn thành công!');
+      alert('🎉 Đã cập nhật công thức và đơn vị tính thành công!');
     } catch (err) {
       alert('Lỗi: ' + (err.message || 'Không thể cập nhật'));
     } finally {
@@ -288,14 +355,16 @@ export default function EditRecipeModal({
           </div>
 
           <div style={modalStyles.formGroup}>
-            <label style={modalStyles.label}>Nguyên liệu (mỗi dòng 1 loại)</label>
+            <label style={modalStyles.label}>
+              Nguyên liệu (Mỗi dòng 1 loại: Tên: Số lượng ĐVT)
+            </label>
             <textarea
               name="ingredients"
-              rows={4}
+              rows={5}
               value={formData.ingredients}
               onChange={handleChange}
               style={modalStyles.textarea}
-              placeholder="Ví dụ: Cà tím: 2 quả&#10;Tỏi băm: 1 củ"
+              placeholder="Ví dụ:&#10;Cà tím: 2 quả&#10;Ớt cay: 2 quả&#10;Tỏi: 1 củ&#10;Nước mắm: 2 thìa canh"
             />
           </div>
 
