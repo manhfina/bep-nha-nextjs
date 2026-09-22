@@ -3,9 +3,10 @@ import { NextResponse } from 'next/server';
 const rawKey = process.env.GEMINI_API_KEY || '';
 const apiKey = rawKey.trim().replace(/[\r\n\t]/g, '');
 
+// Cập nhật đúng các model được Google AI hỗ trợ
 const CANDIDATE_MODELS = [
+  'gemini-3.1-pro-preview',
   'gemini-2.5-flash',
-  'gemini-2.5-pro',
 ];
 
 function extractJson(text) {
@@ -119,7 +120,7 @@ Văn bản:
       }
 
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const endpoint = 'https://' + '[generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)';
+      const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)';
 
       const payload = {
         contents: [
