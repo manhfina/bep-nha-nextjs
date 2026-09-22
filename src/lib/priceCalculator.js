@@ -1,7 +1,7 @@
 // src/lib/priceCalculator.js
 
 /**
- * Chuẩn hóa tên nguyên liệu: loại bỏ số, dấu đặc biệt và các từ bổ trợ thừa
+ * Chuẩn hóa tên nguyên liệu: loại bỏ số, dấu đặc biệt và khoảng trắng thừa
  */
 export function normalizeIngredientName(rawName) {
   if (!rawName) return '';
@@ -40,7 +40,7 @@ export function parseIngredientAmount(ing, baseServings = 2, currentServings = 2
     text = `${ing.name || ''} ${ing.unit || ''} ${ing.amount || ''}`;
   }
 
-  const regex = /([\d.,]+)\s*(kilogram|kg|gam|gram|gr|g|lạng|quả|trái|củ|nhánh|cọng|tép|bó|mớ|miếng|hộp|lít|lit|ml|thìa cà phê|thìa canh|thìa|muỗng cà phê|muỗng|bát|chén)?/i;
+  const regex = /([\d.,]+)\s*(kilogram|kg|gam|gram|gr|g|lạng|quả|trái|củ|nhánh|cọng|tép|bó|mớ|miếng|hộp|chai|lít|lit|ml|thìa cà phê|muỗng cà phê|thìa canh|muỗng canh|thìa|muỗng|bát|chén)?/i;
   const match = text.match(regex);
 
   if (match) {
@@ -57,24 +57,26 @@ export function parseIngredientAmount(ing, baseServings = 2, currentServings = 2
 }
 
 /**
- * Ánh xạ từ khóa biến thể về từ khóa gốc phổ biến trong từ điển giá
+ * Tìm kiếm và khớp tên nguyên liệu với bảng giá
  */
 function findMatchedPrice(cleanName, priceMap = {}) {
   const keys = Object.keys(priceMap || {}).sort((a, b) => b.length - a.length);
 
-  // 1. Tìm khớp trực tiếp
+  // 1. Khớp chuỗi trực tiếp
   for (const key of keys) {
     if (cleanName.includes(key.toLowerCase())) {
       return priceMap[key];
     }
   }
 
-  // 2. Map các biến thể tên gọi thường gặp ở bếp Việt
+  // 2. Nhận diện các bí danh (aliases) gia vị & rau thơm phổ biến
   const aliases = [
     { pattern: /(hành mùi|hành hoa|ngò rí|rau mùi|rau ngò|hành ngò)/i, target: 'hành lá' },
-    { pattern: /(hành tím băm|hành khô băm|hành khô)/i, target: 'hành tím' },
-    { pattern: /(tỏi băm|tỏi củ)/i, target: 'tỏi' },
+    { pattern: /(hành tím băm|hành tím|hành khô)/i, target: 'hành tím' },
+    { pattern: /(tỏi băm|tỏi củ|tỏi)/i, target: 'tỏi' },
+    { pattern: /(dầu hào|dầu mỡ|dầu ăn|dầu mè)/i, target: 'dầu hào' },
     { pattern: /(tiêu xay|bột tiêu|hạt tiêu)/i, target: 'tiêu' },
+    { pattern: /(nước tương|xì dầu)/i, target: 'nước tương' },
     { pattern: /(cà chua bi)/i, target: 'cà chua' },
   ];
 
@@ -101,23 +103,27 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
 
   const matchedPrice = findMatchedPrice(cleanName, priceMap);
 
-  // Nhóm rau thơm, gia vị nêm nếm phụ gia nhỏ
-  const isHerbOrSpice = /(hành mùi|hành hoa|hành lá|ngò|rau mùi|hành tím|tỏi|ớt|tiêu|nước mắm|mắm|muối|đường|hạt nêm|bột ngọt|dầu ăn|giấm)/i.test(cleanName);
+  // Phân loại nhóm gia vị lỏng, sốt, hạt nêm nếm
+  const isLiquidSeasoning = /(dầu hào|dầu mè|nước tương|xì dầu|nước mắm|mắm|dầu ăn|giấm|tương ớt|tương cà)/i.test(cleanName);
+  const isDrySeasoning = /(hạt nêm|bột ngọt|mì chính|muối|đường|tiêu|hạt tiêu|ớt bột)/i.test(cleanName);
 
-  // Nếu không tìm thấy giá trong từ điển
+  // 1. Nếu không tìm thấy trong từ điển giá: Ước lượng thông minh
   if (!matchedPrice) {
-    let fallbackCost = 2000;
-    if (['nhánh', 'cọng', 'tép'].includes(unit)) {
-      fallbackCost = Math.round(amount * 500); // 1 nhánh rau thơm ~ 500đ
-    } else if (unit === 'củ' && /(hành tím|tỏi)/i.test(cleanName)) {
-      fallbackCost = Math.round(amount * 500); // 1 củ hành tím ~ 500đ (0.5 củ ~ 250-300đ)
-    } else if (isHerbOrSpice) {
-      fallbackCost = 500;
+    let cost = 1000;
+    if (unit.includes('cà phê')) {
+      cost = Math.round(amount * 200); // 1 thìa cà phê ~ 200đ
+    } else if (unit.includes('canh') || unit.includes('thìa') || unit.includes('muỗng')) {
+      cost = Math.round(amount * 500); // 1 thìa canh dầu hào / nước mắm ~ 500đ
+    } else if (unit === 'tép') {
+      cost = Math.round(amount * 200); // 1 tép tỏi ~ 200đ
+    } else if (['nhánh', 'cọng'].includes(unit)) {
+      cost = Math.round(amount * 300); // 1 nhánh hành ~ 300đ
+    } else if (isLiquidSeasoning || isDrySeasoning) {
+      cost = Math.round(amount * 400);
     }
-
     return {
       name,
-      cost: Math.max(300, fallbackCost),
+      cost: Math.max(300, cost),
       estimated: true,
     };
   }
@@ -126,8 +132,27 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
   const price = Number(matchedPrice.price_per_unit) || 0;
   let finalCost = 0;
 
-  // 1. ĐƠN GIÁ CHUẨN LÀ "KG"
-  if (standardUnit === 'kg') {
+  // 2. Xử lý các đơn vị đo thìa / muỗng gia vị (Dầu hào, nước mắm, xì dầu...)
+  if (unit.includes('cà phê')) {
+    // 1 thìa cà phê khoảng 3g - 5g (hoặc 5ml)
+    if (standardUnit === 'kg' || standardUnit === 'lít' || standardUnit === 'chai') {
+      finalCost = amount * 0.005 * price;
+    } else {
+      finalCost = amount * 250;
+    }
+  } else if (unit.includes('canh') || unit.includes('thìa') || unit.includes('muỗng')) {
+    // 1 thìa canh khoảng 10g - 12g (hoặc 10ml)
+    if (standardUnit === 'kg' || standardUnit === 'lít') {
+      finalCost = amount * 0.012 * price;
+    } else if (standardUnit === 'chai' || standardUnit === 'hộp') {
+      // 1 chai dầu hào ~350g, 1 thìa canh chiếm khoảng 1/30 chai
+      finalCost = (amount / 30) * price;
+    } else {
+      finalCost = amount * 500;
+    }
+  } 
+  // 3. Đơn vị chuẩn là "KG"
+  else if (standardUnit === 'kg') {
     if (['g', 'gam', 'gr', 'gram'].includes(unit)) {
       finalCost = (amount / 1000) * price;
     } else if (unit === 'lạng') {
@@ -135,47 +160,45 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
     } else if (unit === 'kg' || unit === 'kilogram') {
       finalCost = amount * price;
     } 
-    // Quả/Trái (Cà chua, dưa chuột...)
+    // Tép (Tỏi): 1 tép tỏi chỉ khoảng 2.5g - 3g (0.0025 kg)
+    else if (unit === 'tép') {
+      finalCost = amount * 0.0025 * price;
+    }
+    // Nhánh / Cọng (Hành lá, rau mùi, thì là): ~6g (0.006 kg)
+    else if (['nhánh', 'cọng'].includes(unit)) {
+      finalCost = amount * 0.006 * price;
+    }
+    // Củ (Hành tím, tỏi củ, hành tây, gừng):
+    else if (unit === 'củ') {
+      const isSmall = /(hành tím|tỏi|hành khô|gừng)/i.test(cleanName);
+      const kgPerRoot = isSmall ? 0.012 : 0.12; 
+      finalCost = amount * kgPerRoot * price;
+    } 
+    // Quả / Trái (Cà chua, dưa chuột...)
     else if (['quả', 'trái'].includes(unit)) {
       const kgPerPiece = /(ớt|chanh|quất|tắc)/i.test(cleanName) ? 0.015 : 0.1;
       finalCost = amount * kgPerPiece * price;
     } 
-    // Củ (Hành tím, tỏi, hành tây, cà rốt...)
-    else if (unit === 'củ') {
-      // 1 củ hành tím/tỏi chỉ nặng khoảng 12g - 15g (0.012 kg)
-      const isSmallBulb = /(hành tím|tỏi|hành khô)/i.test(cleanName);
-      const kgPerRoot = isSmallBulb ? 0.012 : 0.12; 
-      finalCost = amount * kgPerRoot * price;
-    } 
-    // Nhánh / Cọng / Tép (Hành lá, hành mùi, ngò, tỏi...)
-    else if (['nhánh', 'cọng', 'tép'].includes(unit)) {
-      // 1 nhánh hành lá / cọng ngò chỉ khoảng 6g - 8g (0.007 kg)
-      finalCost = amount * 0.007 * price;
-    } 
     // Bó / Mớ
     else if (['bó', 'mớ'].includes(unit)) {
-      finalCost = amount * 0.25 * price; // ~250g
-    } 
-    // Thìa / muỗng
-    else if (unit.includes('thìa') || unit.includes('muỗng')) {
-      finalCost = 500;
+      finalCost = amount * 0.25 * price;
     } 
     else {
       if (amount >= 10) {
-        finalCost = (amount / 1000) * price; // Giả định là gram nếu số lớn
+        finalCost = (amount / 1000) * price;
       } else {
         finalCost = amount * 0.05 * price;
       }
     }
   } 
-  // 2. ĐƠN GIÁ CHUẨN LÀ "QUẢ" / "TRÁI"
+  // 4. Đơn vị chuẩn là Quả / Trái (Trứng gà, quả dừa...)
   else if (['quả', 'trái'].includes(standardUnit)) {
     finalCost = amount * price;
   }
-  // 3. ĐƠN GIÁ THEO BÓ / GÓI / HỘP
-  else if (['bó', 'mớ', 'gói', 'hộp'].includes(standardUnit)) {
-    if (['nhánh', 'cọng'].includes(unit)) {
-      finalCost = (amount / 10) * price; // 1 nhánh bằng 1/10 bó
+  // 5. Đơn vị chuẩn là Chai / Hộp / Gói
+  else if (['chai', 'lọ', 'hộp', 'gói'].includes(standardUnit)) {
+    if (unit.includes('thìa') || unit.includes('muỗng')) {
+      finalCost = (amount / 30) * price;
     } else {
       finalCost = amount * price;
     }
@@ -184,7 +207,7 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
     finalCost = amount * price;
   }
 
-  // Khống chế mức sàn tối thiểu hợp lý (300đ thay vì 1.000đ hay 3.000đ)
+  // Khống chế mức sàn tối thiểu: 300đ (cho gia vị ít)
   finalCost = Math.max(300, Math.round(finalCost));
 
   return {
