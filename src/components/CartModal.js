@@ -108,8 +108,31 @@ const parseIngredient = (rawText = '') => {
 };
 
 // Gợi ý đóng gói mua thực tế ngoài chợ
-const getSuggestedPack = (unit, qty) => {
-  const u = (unit || '').toLowerCase();
+const getSuggestedPack = (unit, qty, name = '') => {
+  const u = (unit || '').toLowerCase().trim();
+  const n = (name || '').toLowerCase().trim();
+
+  // 1. Nhóm đóng chai đặc thù: mắm tôm, dầu ăn, nước mắm, dầu hào, giấm
+  if (/(mắm tôm|nước mắm|dầu hào|dầu ăn|dầu mè|giấm|xì dầu|nước tương)/i.test(n)) {
+    if (u.includes('muỗng') || u.includes('thìa') || u.includes('canh') || u.includes('ít') || u.includes('cà phê')) {
+      return 'Gia vị có sẵn (hoặc mua 1 hũ/chai)';
+    }
+    return 'Mua 1 chai/hũ';
+  }
+
+  // 2. Gia vị thìa / muỗng / nêm nếm nói chung
+  if (
+    u.includes('thìa') ||
+    u.includes('muỗng') ||
+    u.includes('canh') ||
+    u.includes('cà phê') ||
+    ['ít', 'chút', 'nhúm', 'vừa đủ', 'phần'].includes(u) ||
+    n.includes('gia vị')
+  ) {
+    return 'Gia vị sẵn có trong bếp';
+  }
+
+  // 3. Khối lượng gram
   if (u === 'g') {
     if (qty >= 1000) {
       const kg = Math.ceil(qty / 100) / 10;
@@ -118,12 +141,12 @@ const getSuggestedPack = (unit, qty) => {
     const rounded = Math.ceil(qty / 50) * 50;
     return `Mua chẵn ${rounded}g (~${Math.round(rounded / 100)} lạng)`;
   }
+
+  // 4. Các đơn vị đếm thông dụng
   if (['quả', 'trái', 'miếng', 'vắt', 'bó', 'củ'].includes(u)) {
     return `Mua chẵn ${Math.ceil(qty)} ${u}`;
   }
-  if (['ít', 'chút', 'thìa', 'muỗng', 'phần'].includes(u)) {
-    return 'Gia vị sẵn có trong bếp';
-  }
+
   return `Mua ~${Math.ceil(qty)} ${unit}`;
 };
 
@@ -191,13 +214,13 @@ export default function CartModal({
         groupKey: key,
         totalQuantity: parsed.quantity,
         unit: parsed.unit,
-        suggested: getSuggestedPack(parsed.unit, parsed.quantity),
+        suggested: getSuggestedPack(parsed.unit, parsed.quantity, parsed.name),
         dishes: [item.dish],
         ids: [item.id],
       };
     } else {
       acc[key].totalQuantity = Math.round((acc[key].totalQuantity + parsed.quantity) * 100) / 100;
-      acc[key].suggested = getSuggestedPack(acc[key].unit, acc[key].totalQuantity);
+      acc[key].suggested = getSuggestedPack(acc[key].unit, acc[key].totalQuantity, acc[key].name);
       if (!acc[key].dishes.includes(item.dish)) {
         acc[key].dishes.push(item.dish);
       }
@@ -280,7 +303,7 @@ export default function CartModal({
           'Món ăn': item.dish,
           'Nguyên liệu': parsed.name,
           'Cần dùng': `${parsed.quantity} ${parsed.unit}`,
-          'Gợi ý mua ngoài chợ': getSuggestedPack(parsed.unit, parsed.quantity),
+          'Gợi ý mua ngoài chợ': getSuggestedPack(parsed.unit, parsed.quantity, parsed.name),
           'Đơn giá (VNĐ)': uPrice,
           'Thành tiền (VNĐ)': Math.round(parsed.quantity * uPrice),
         };
@@ -301,7 +324,7 @@ export default function CartModal({
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Chi phí đi chợ');
 
-    worksheet['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 14 }, { wch: 25 }, { wch: 14 }, { wch: 16 }, { wch: 26 }];
+    worksheet['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 14 }, { wch: 32 }, { wch: 14 }, { wch: 16 }, { wch: 26 }];
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(workbook, `Chi_Phi_Di_Cho_${dateStr}.xlsx`);
   };
