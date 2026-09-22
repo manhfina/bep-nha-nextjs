@@ -3,7 +3,36 @@ import { GoogleGenAI, Type } from '@google/genai';
 
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
-const MODEL_NAME = 'gemini-3.6-flash';
+
+// Danh sách các model ổn định theo thứ tự ưu tiên (Tự động đổi nếu model chính nghẽn 503)
+const CANDIDATE_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-1.5-flash',
+];
+
+// Hàm hỗ trợ gọi Gemini kèm Retry và Fallback model tự động
+async function generateWithFallback(paramsGenerator) {
+  let lastError = null;
+
+  for (const model of CANDIDATE_MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const params = paramsGenerator(model);
+        const response = await ai.models.generateContent(params);
+        if (response && response.text) {
+          return response;
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn(`Lỗi gọi model ${model} (lần ${attempt + 1}):`, err.message);
+        // Chờ ngắn trước khi thử lại
+        await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError || new Error('Không thể kết nối đến máy chủ AI');
+}
 
 export async function POST(request) {
   if (!ai) {
@@ -16,7 +45,7 @@ export async function POST(request) {
   try {
     const { action, text, imageBase64 } = await request.json();
 
-    // 1. ACTION: Bóc tách TOÀN BỘ CÔNG THỨC từ văn bản thô (Tên món, thời gian, nguyên liệu, các bước)
+    // 1. ACTION: Bóc tách TOÀN BỘ CÔNG THỨC từ văn bản thô
     if (action === 'parse-recipe') {
       if (!text?.trim()) {
         return NextResponse.json({ error: 'Thiếu nội dung văn bản' }, { status: 400 });
@@ -26,7 +55,7 @@ export async function POST(request) {
 Yêu cầu:
 - Tên món ăn (title).
 - Mô tả ngắn gọn (desc).
-- Thời gian nấu (cook_time: số phút, ví dụ: 20).
+- Thời gian nấu (cook_time: số phút nguyên, ví dụ: 20).
 - Độ khó (difficulty: "Rất dễ", "Dễ", "Trung bình", "Khó").
 - Khẩu phần cơ bản (base_servings: số người, mặc định là 2 nếu không đề cập).
 - Danh sách nguyên liệu (ingredients): tên nguyên liệu (name), định lượng cho 1 người ăn (amountPerPerson), đơn vị tính (unit). Ví dụ: tổng 300g cho 2 người thì amountPerPerson là 150, unit là "g".
@@ -35,8 +64,8 @@ Yêu cầu:
 Đoạn văn bản cần phân tích:
 """${text}"""`;
 
-      const response = await ai.models.generateContent({
-        model: MODEL_NAME,
+      const response = await generateWithFallback((model) => ({
+        model,
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -63,13 +92,13 @@ Yêu cầu:
               steps: {
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
-                description: 'Danh sách các bước nấu'
+                description: 'Danh sách các bước nấu',
               },
             },
             required: ['title', 'ingredients', 'steps'],
           },
         },
-      });
+      }));
 
       const parsedData = JSON.parse(response.text);
       return NextResponse.json({ success: true, data: parsedData });
@@ -85,8 +114,8 @@ Yêu cầu:
       const prompt = `Phân tích bức ảnh này (ảnh chụp tủ lạnh hoặc hóa đơn thực phẩm).
 Nhận diện tất cả các nguyên liệu nấu ăn. Trả về JSON gồm tên thực phẩm, số lượng ước tính và đơn vị.`;
 
-      const response = await ai.models.generateContent({
-        model: MODEL_NAME,
+      const response = await generateWithFallback((model) => ({
+        model,
         contents: [
           {
             inlineData: {
@@ -111,7 +140,7 @@ Nhận diện tất cả các nguyên liệu nấu ăn. Trả về JSON gồm t�
             },
           },
         },
-      });
+      }));
 
       const items = JSON.parse(response.text);
       return NextResponse.json({ success: true, items });
