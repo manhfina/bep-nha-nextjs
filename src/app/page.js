@@ -23,6 +23,9 @@ export default function Home() {
   const [shoppingList, setShoppingList] = useState([]);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
+  // Trạng thái mạng ngoại tuyến
+  const [isOffline, setIsOffline] = useState(false);
+
   // Bảng giá nguyên liệu
   const [priceMap, setPriceMap] = useState({});
 
@@ -68,21 +71,36 @@ export default function Home() {
     steps: item.steps || item.instructions || [],
   });
 
-  // 1. Tải công thức từ API
+  // 1. Tải công thức từ API có cache Offline tự động
   const fetchRecipes = async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/recipes');
       const data = await res.json();
       if (Array.isArray(data)) {
-        setRecipes(data.map(formatRecipe));
+        const formatted = data.map(formatRecipe);
+        setRecipes(formatted);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('cached_recipes', JSON.stringify(formatted));
+        }
       } else {
-        console.error('Lỗi tải dữ liệu:', data);
+        throw new Error('Dữ liệu không phải là danh sách');
       }
     } catch (err) {
-      console.error('Fetch error:', err);
+      console.warn('Lỗi mạng, chuyển sang đọc cache offline:', err);
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem('cached_recipes');
+        if (cached) {
+          try {
+            setRecipes(JSON.parse(cached));
+          } catch (e) {
+            console.error('Lỗi parse cache:', e);
+          }
+        }
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // 2. Tải thông tin Bếp gia đình
@@ -122,20 +140,52 @@ export default function Home() {
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
   };
 
-  // 4. Tải từ điển giá
+  // 4. Tải từ điển giá có cache Offline
   const fetchPrices = async () => {
     try {
       const res = await fetch('/api/prices');
       const data = await res.json();
       if (data && !data.error) {
         setPriceMap(data);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('cached_prices', JSON.stringify(data));
+        }
       }
     } catch (err) {
-      console.error('Lỗi tải bảng giá:', err);
+      console.warn('Lỗi tải giá từ mạng, đọc từ cache:', err);
+      if (typeof window !== 'undefined') {
+        const cachedPrices = localStorage.getItem('cached_prices');
+        if (cachedPrices) {
+          try {
+            setPriceMap(JSON.parse(cachedPrices));
+          } catch (e) {}
+        }
+      }
     }
   };
 
-  // Khởi tạo và lắng nghe phiên đăng nhập & Realtime Supabase
+  // Khởi tạo, lắng nghe mạng Online/Offline & Realtime Supabase
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsOffline(!navigator.onLine);
+
+      const handleOnline = () => {
+        setIsOffline(false);
+        fetchRecipes();
+        fetchPrices();
+      };
+      const handleOffline = () => setIsOffline(true);
+
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      };
+    }
+  }, []);
+
   useEffect(() => {
     fetchRecipes();
     fetchPrices();
@@ -160,16 +210,24 @@ export default function Home() {
             const newFormatted = formatRecipe(payload.new);
             setRecipes((prev) => {
               if (prev.some((r) => r.id === newFormatted.id)) return prev;
-              return [newFormatted, ...prev];
+              const next = [newFormatted, ...prev];
+              localStorage.setItem('cached_recipes', JSON.stringify(next));
+              return next;
             });
           } else if (payload.eventType === 'UPDATE') {
             const updatedFormatted = formatRecipe(payload.new);
-            setRecipes((prev) =>
-              prev.map((r) => (r.id === updatedFormatted.id ? updatedFormatted : r))
-            );
+            setRecipes((prev) => {
+              const next = prev.map((r) => (r.id === updatedFormatted.id ? updatedFormatted : r));
+              localStorage.setItem('cached_recipes', JSON.stringify(next));
+              return next;
+            });
             setActiveRecipe((prev) => (prev?.id === updatedFormatted.id ? updatedFormatted : prev));
           } else if (payload.eventType === 'DELETE') {
-            setRecipes((prev) => prev.filter((r) => r.id !== payload.old.id));
+            setRecipes((prev) => {
+              const next = prev.filter((r) => r.id !== payload.old.id);
+              localStorage.setItem('cached_recipes', JSON.stringify(next));
+              return next;
+            });
             setActiveRecipe((prev) => (prev?.id === payload.old.id ? null : prev));
           }
         }
@@ -408,17 +466,23 @@ export default function Home() {
     const formattedItem = formatRecipe(newRecipe);
     setRecipes((prev) => {
       if (prev.some((r) => r.id === formattedItem.id)) return prev;
-      return [formattedItem, ...prev];
+      const next = [formattedItem, ...prev];
+      localStorage.setItem('cached_recipes', JSON.stringify(next));
+      return next;
     });
   };
 
   const handleRecipeUpdated = (updatedRecipe) => {
     const formatted = formatRecipe(updatedRecipe);
-    setRecipes((prev) => prev.map((r) => (r.id === formatted.id ? formatted : r)));
+    setRecipes((prev) => {
+      const next = prev.map((r) => (r.id === formatted.id ? formatted : r));
+      localStorage.setItem('cached_recipes', JSON.stringify(next));
+      return next;
+    });
     if (activeRecipe?.id === formatted.id) setActiveRecipe(formatted);
   };
 
-  // Xóa công thức có kèm kiểm tra quyền
+  // Xóa công thức
   const handleDeleteRecipe = async (id) => {
     const phone = extractUserPhone(user);
     try {
@@ -434,7 +498,11 @@ export default function Home() {
         throw new Error(err.error || 'Xóa thất bại');
       }
 
-      setRecipes((prev) => prev.filter((r) => r.id !== id));
+      setRecipes((prev) => {
+        const next = prev.filter((r) => r.id !== id);
+        localStorage.setItem('cached_recipes', JSON.stringify(next));
+        return next;
+      });
       alert('Đã xóa món ăn thành công!');
     } catch (err) {
       alert('Lỗi khi xóa: ' + err.message);
@@ -540,7 +608,7 @@ export default function Home() {
                 🏡 {kitchenData?.kitchen ? kitchenData.kitchen.name : 'Vào Bếp gia đình'}
               </button>
 
-              {/* Nút Phân quyền: Đặt độc lập bên ngoài, chỉ hiện cho Admin */}
+              {/* Nút Phân quyền Admin */}
               {isUserAdmin(user, { role: userRole }) && (
                 <button
                   onClick={() => setIsAdminModalOpen(true)}
@@ -648,7 +716,30 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Thanh tìm kiếm có Micro, Random, Dọn tủ lạnh, Lịch tuần và Tabs */}
+      {/* Thông báo trạng thái Offline */}
+      {isOffline && (
+        <div
+          style={{
+            backgroundColor: '#2d3436',
+            color: '#ffeaa7',
+            padding: '10px 16px',
+            borderRadius: '14px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            fontSize: '0.88rem',
+            fontWeight: '600',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}
+        >
+          <span>⚡</span>
+          <span>Bạn đang ở chế độ Ngoại tuyến (Offline). Các công thức đã lưu vẫn xem và nấu bình thường!</span>
+        </div>
+      )}
+
+      {/* Thanh tìm kiếm và các nút chức năng */}
       <div className="search-bar">
         <div style={{ position: 'relative', flex: '1 1 240px', display: 'flex', alignItems: 'center' }}>
           <input
@@ -724,7 +815,6 @@ export default function Home() {
           📅 Lịch tuần
         </button>
         
-        {/* Nút thêm công thức: Chỉ hiển thị cho Admin và Editor */}
         {hasPermission && (
           <button onClick={() => setIsAddOpen(true)} className="btn-primary">
             + Đăng công thức mới
@@ -828,7 +918,7 @@ export default function Home() {
       {/* Danh sách món ăn */}
       {loading ? (
         <p style={{ textAlign: 'center', color: '#7f8c8d', padding: '40px 0' }}>
-          Đang kết nối và lấy dữ liệu từ Supabase...
+          Đang kết nối và lấy dữ liệu...
         </p>
       ) : filteredRecipes.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px 0', color: '#888' }}>
