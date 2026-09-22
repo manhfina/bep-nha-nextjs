@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 const apiKey = process.env.GEMINI_API_KEY;
 
-// Danh sách các model chính thức theo thứ tự ưu tiên
+// Sử dụng model chính thức ổn định
 const CANDIDATE_MODELS = [
   'gemini-2.5-flash',
   'gemini-2.5-pro',
@@ -32,7 +32,6 @@ function extractJsonFromText(rawText) {
   return JSON.parse(cleaned);
 }
 
-// Gọi REST API trực tiếp của Google Gemini với key AQ...
 async function callGemini(promptText) {
   if (!apiKey) {
     throw new Error('Chưa cấu hình GEMINI_API_KEY trong Environment Variables');
@@ -41,8 +40,9 @@ async function callGemini(promptText) {
   let lastError = null;
 
   for (const model of CANDIDATE_MODELS) {
-    // Nối chuỗi bằng dấu cộng thuần túy, tránh lỗi parse link
-    const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)' + model + ':generateContent?key=' + apiKey;
+    // Dựng URL chuẩn thông qua constructor URL để loại bỏ 100% lỗi parse URL
+    const url = new URL(`[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){model}:generateContent`);
+    url.searchParams.set('key', apiKey.trim());
 
     const requestBody = {
       contents: [
@@ -58,11 +58,10 @@ async function callGemini(promptText) {
     };
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetch(url.toString(), {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
         },
         body: JSON.stringify(requestBody),
         cache: 'no-store',
@@ -71,8 +70,8 @@ async function callGemini(promptText) {
       const responseText = await response.text();
 
       if (!response.ok) {
-        console.warn('Lỗi từ Google (' + response.status + '):', responseText);
-        lastError = new Error('Google API (' + response.status + '): ' + responseText);
+        console.warn(`Lỗi Google API (${response.status}):`, responseText);
+        lastError = new Error(`Google API (${response.status}): ${responseText}`);
         continue;
       }
 
@@ -84,7 +83,7 @@ async function callGemini(promptText) {
         if (parsed) return parsed;
       }
     } catch (err) {
-      console.warn('Lỗi kết nối model ' + model + ':', err.message);
+      console.warn(`Lỗi model ${model}:`, err.message);
       lastError = err;
     }
   }
@@ -97,14 +96,14 @@ export async function POST(request) {
     const body = await request.json().catch(() => ({}));
     const { action, text, imageBase64 } = body;
 
-    // 1. ACTION: Bóc tách công thức nấu ăn
+    // 1. ACTION: Bóc tách công thức từ văn bản thô
     if (action === 'parse-recipe') {
       if (!text || !text.trim()) {
         return NextResponse.json({ error: 'Nội dung văn bản trống!' }, { status: 400 });
       }
 
       const prompt = `
-Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản mô tả công thức nấu ăn bên dưới và chuyển đổi thành một đối tượng JSON hợp lệ theo đúng mẫu sau:
+Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản mô tả công thức nấu ăn bên dưới và chuyển đổi thành một đối tượng JSON hợp lệ theo đúng mẫu sau (KHÔNG dùng markdown):
 
 {
   "title": "Tên món ăn (ngắn gọn, viết hoa chữ cái đầu)",
@@ -126,16 +125,16 @@ Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản mô
 }
 
 Quy định:
-1. "title": Bắt buộc có tên món ăn.
+1. "title": Tên món ăn rõ ràng.
 2. "cook_time": Số nguyên phút.
-3. "difficulty": Chọn 1 trong 4 giá trị: "Rất dễ", "Dễ", "Trung bình", "Khó".
-4. "base_servings": Mặc định là 2.
-5. "ingredients": Mảng gồm { name, amountPerPerson, unit }.
-6. "steps": Danh sách mảng các bước nấu dạng chuỗi.
+3. "difficulty": Một trong 4 giá trị "Rất dễ", "Dễ", "Trung bình", "Khó".
+4. "base_servings": Mặc định là 2 nếu không đề cập.
+5. "ingredients": Định lượng theo 1 người ăn, đơn vị tính rõ ràng (g, quả, tép, củ, thìa canh...).
+6. "steps": Mảng các bước tuần tự.
 
-Văn bản:
+Văn bản cần bóc tách:
 """
-` + text + `
+${text}
 """`;
 
       const recipeData = await callGemini(prompt);
@@ -154,7 +153,8 @@ Văn bản:
       }
 
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const visionEndpoint = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=)' + apiKey;
+      const url = new URL('[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)');
+      url.searchParams.set('key', apiKey.trim());
 
       const visionBody = {
         contents: [
@@ -179,12 +179,9 @@ Văn bản:
         },
       };
 
-      const res = await fetch(visionEndpoint, {
+      const res = await fetch(url.toString(), {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(visionBody),
       });
 
