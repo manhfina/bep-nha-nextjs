@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 const rawKey = process.env.GEMINI_API_KEY || '';
 const apiKey = rawKey.trim().replace(/[\r\n\t]/g, '');
 
-// Sử dụng chính xác model Google yêu cầu
+// Sử dụng model chính thức được Google chỉ định
 const CANDIDATE_MODELS = [
   'gemini-3.6-flash',
   'gemini-3.1-pro-preview',
@@ -24,6 +24,13 @@ function extractJson(text) {
   return JSON.parse(cleaned);
 }
 
+// Giải mã URL gốc từ Base64 để chống 100% lỗi tự sinh Markdown link
+function getEndpoint(modelName) {
+  // Base64 của: "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)"
+  const base = Buffer.from('aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy8=', 'base64').toString('utf8');
+  return base + modelName + ':generateContent';
+}
+
 async function callGemini(promptText) {
   if (!apiKey) {
     throw new Error('Chưa cấu hình GEMINI_API_KEY trong Environment Variables');
@@ -32,7 +39,7 @@ async function callGemini(promptText) {
   let lastError = null;
 
   for (const model of CANDIDATE_MODELS) {
-    const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)' + model + ':generateContent';
+    const endpoint = getEndpoint(model);
 
     const payload = {
       contents: [
@@ -117,7 +124,7 @@ Văn bản:
       }
 
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent)';
+      const endpoint = getEndpoint('gemini-3.6-flash');
 
       const payload = {
         contents: [
