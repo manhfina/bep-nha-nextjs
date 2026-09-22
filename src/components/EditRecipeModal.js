@@ -26,21 +26,45 @@ export default function EditRecipeModal({
     instructions: '',
   });
 
+  // Hàm chuyển đổi an toàn mọi định dạng dữ liệu (Array, JSON string, Object)
+  const safeParseArray = (raw) => {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        return raw.split('\n').map((s) => s.trim()).filter(Boolean);
+      }
+    }
+    return [];
+  };
+
   useEffect(() => {
-    if (recipe) {
-      const ingList = recipe.ingredients || [];
-      const ingText = Array.isArray(ingList)
-        ? ingList
-            .map((ing) => (typeof ing === 'string' ? ing : ing?.name || ''))
-            .filter(Boolean)
-            .join('\n')
-        : '';
+    if (recipe && isOpen) {
+      // 1. Phân tích nguyên liệu an toàn
+      const rawIngs = safeParseArray(recipe.ingredients);
+      const ingLines = rawIngs.map((item) => {
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && item !== null) {
+          if (item.name && item.amount) {
+            return `${item.name}: ${item.amount} ${item.unit || ''}`.trim();
+          }
+          return item.name || item.text || '';
+        }
+        return '';
+      }).filter(Boolean);
 
-      const stepList = recipe.steps || recipe.instructions || [];
-      const stepText = Array.isArray(stepList)
-        ? stepList.filter(Boolean).join('\n')
-        : '';
+      // 2. Phân tích các bước nấu an toàn
+      const rawSteps = safeParseArray(recipe.steps || recipe.instructions);
+      const stepLines = rawSteps.map((item) => {
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && item !== null) return item.step || item.text || item.description || '';
+        return '';
+      }).filter(Boolean);
 
+      // 3. Thời gian và ảnh
       const parsedTime = parseInt(recipe.time) || parseInt(recipe.cook_time) || 15;
       const initialImg = recipe.image || recipe.image_url || '';
 
@@ -50,12 +74,12 @@ export default function EditRecipeModal({
         cook_time: parsedTime,
         difficulty: recipe.difficulty || 'Dễ',
         image_url: initialImg,
-        ingredients: ingText,
-        instructions: stepText,
+        ingredients: ingLines.join('\n'),
+        instructions: stepLines.join('\n'),
       });
       setPreviewImage(initialImg);
     }
-  }, [recipe]);
+  }, [recipe, isOpen]);
 
   if (!isOpen || !recipe) return null;
 
@@ -96,7 +120,6 @@ export default function EditRecipeModal({
     }
   };
 
-  // Trích xuất số điện thoại sạch dạng chuỗi
   const getSafeUserPhone = () => {
     if (!currentUser) return '';
     try {
@@ -112,14 +135,19 @@ export default function EditRecipeModal({
       }
       const firstPart = email.split('@')[0];
       if (/^\d+$/.test(firstPart)) return firstPart;
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) {}
     return '';
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Chặn vô tình lưu nếu form bị trắng tên
+    if (!formData.title.trim()) {
+      alert('Tên món ăn không được để trống!');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -134,7 +162,7 @@ export default function EditRecipeModal({
           unit: '',
         }));
 
-      // Chuẩn hóa các bước
+      // Chuẩn hóa các bước nấu
       const instructionsArray = String(formData.instructions || '')
         .split('\n')
         .map((item) => item.trim())
@@ -144,10 +172,9 @@ export default function EditRecipeModal({
       const phoneStr = getSafeUserPhone();
       const finalImg = String(formData.image_url || previewImage || '').trim();
 
-      // Đóng gói payload thuần túy
       const payload = {
         id: recipe.id,
-        title: String(formData.title || '').trim(),
+        title: String(formData.title).trim(),
         desc: String(formData.description || '').trim(),
         description: String(formData.description || '').trim(),
         time: `${Number(formData.cook_time) || 15} phút`,
@@ -157,6 +184,7 @@ export default function EditRecipeModal({
         image_url: finalImg,
         ingredients: ingredientsArray,
         steps: instructionsArray,
+        instructions: instructionsArray,
       };
 
       const res = await fetch('/api/recipes', {
@@ -171,12 +199,12 @@ export default function EditRecipeModal({
       const responseData = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(responseData.error || `Lỗi máy chủ (${res.status})`);
+        throw new Error(responseData.error || `Lỗi cập nhật (${res.status})`);
       }
 
       onRecipeUpdated(responseData);
       onClose();
-      alert('🎉 Cập nhật công thức thành công!');
+      alert('🎉 Đã lưu thay đổi món ăn thành công!');
     } catch (err) {
       alert('Lỗi: ' + (err.message || 'Không thể cập nhật'));
     } finally {
@@ -267,6 +295,7 @@ export default function EditRecipeModal({
               value={formData.ingredients}
               onChange={handleChange}
               style={modalStyles.textarea}
+              placeholder="Ví dụ: Cà tím: 2 quả&#10;Tỏi băm: 1 củ"
             />
           </div>
 
@@ -278,6 +307,7 @@ export default function EditRecipeModal({
               value={formData.instructions}
               onChange={handleChange}
               style={modalStyles.textarea}
+              placeholder="Bước 1: Sơ chế...&#10;Bước 2: Nấu..."
             />
           </div>
 
