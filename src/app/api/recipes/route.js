@@ -7,19 +7,14 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-/**
- * Kiểm tra quyền thực hiện sửa / xóa
- */
 async function verifyPermission(phone) {
   if (!phone) return false;
-  const cleanPhone = phone.trim();
+  const cleanPhone = String(phone).trim();
 
-  // 1. Kiểm tra nếu là 1 trong 2 số Admin tối cao
   if (ROOT_ADMIN_PHONES.includes(cleanPhone)) {
     return true;
   }
 
-  // 2. Tra cứu trong bảng user_roles
   const { data, error } = await supabase
     .from('user_roles')
     .select('role')
@@ -30,7 +25,6 @@ async function verifyPermission(phone) {
   return data.role === 'admin' || data.role === 'editor';
 }
 
-// GET: Lấy danh sách công thức
 export async function GET() {
   try {
     const { data, error } = await supabase
@@ -47,7 +41,6 @@ export async function GET() {
   }
 }
 
-// POST: Thêm món ăn mới
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -59,17 +52,14 @@ export async function POST(request) {
       .select();
 
     if (error) {
-      console.error('Lỗi Supabase POST:', error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-
     return NextResponse.json(data[0]);
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// DELETE: Xóa công thức
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -96,23 +86,19 @@ export async function DELETE(request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-
     return NextResponse.json({ success: true, id });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// PUT: Cập nhật công thức món ăn
 export async function PUT(request) {
   try {
     const body = await request.json();
-    
-    // TÁCH requesterPhone RA ĐỂ KHÔNG BỊ TRUYỀN VÀO BẢNG RECIPES
     const { id, requesterPhone: bodyPhone, ...rawUpdateData } = body;
     const requesterPhone = request.headers.get('x-user-phone') || bodyPhone;
 
-    // Kiểm tra quyền
+    // 1. Kiểm tra quyền
     const hasPermission = await verifyPermission(requesterPhone);
     if (!hasPermission) {
       return NextResponse.json(
@@ -125,32 +111,62 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Thiếu ID món ăn cần cập nhật' }, { status: 400 });
     }
 
-    // Làm sạch payload: Chỉ gửi các trường hợp lệ lên Supabase
-    const sanitizedUpdate = {};
-    if (rawUpdateData.title !== undefined) sanitizedUpdate.title = rawUpdateData.title;
-    if (rawUpdateData.desc !== undefined) sanitizedUpdate.desc = rawUpdateData.desc;
-    if (rawUpdateData.description !== undefined) sanitizedUpdate.description = rawUpdateData.description;
-    if (rawUpdateData.time !== undefined) sanitizedUpdate.time = rawUpdateData.time;
-    if (rawUpdateData.cook_time !== undefined) sanitizedUpdate.cook_time = rawUpdateData.cook_time;
-    if (rawUpdateData.difficulty !== undefined) sanitizedUpdate.difficulty = rawUpdateData.difficulty;
-    if (rawUpdateData.image !== undefined) sanitizedUpdate.image = rawUpdateData.image;
-    if (rawUpdateData.image_url !== undefined) sanitizedUpdate.image_url = rawUpdateData.image_url;
-    if (rawUpdateData.ingredients !== undefined) sanitizedUpdate.ingredients = rawUpdateData.ingredients;
-    if (rawUpdateData.steps !== undefined) sanitizedUpdate.steps = rawUpdateData.steps;
-    if (rawUpdateData.instructions !== undefined) sanitizedUpdate.instructions = rawUpdateData.instructions;
+    // 2. Chuẩn hóa payload an toàn
+    const cleanUpdate = {};
 
+    if (rawUpdateData.title !== undefined) cleanUpdate.title = String(rawUpdateData.title).trim();
+    if (rawUpdateData.desc !== undefined) cleanUpdate.desc = String(rawUpdateData.desc).trim();
+    if (rawUpdateData.description !== undefined) cleanUpdate.description = String(rawUpdateData.description).trim();
+    if (rawUpdateData.time !== undefined) cleanUpdate.time = String(rawUpdateData.time).trim();
+    if (rawUpdateData.cook_time !== undefined) cleanUpdate.cook_time = Number(rawUpdateData.cook_time) || 15;
+    if (rawUpdateData.difficulty !== undefined) cleanUpdate.difficulty = String(rawUpdateData.difficulty).trim();
+    if (rawUpdateData.image !== undefined) cleanUpdate.image = String(rawUpdateData.image);
+    if (rawUpdateData.image_url !== undefined) cleanUpdate.image_url = String(rawUpdateData.image_url);
+
+    // Xử lý an toàn cho mảng ingredients và steps
+    if (rawUpdateData.ingredients !== undefined) {
+      cleanUpdate.ingredients = Array.isArray(rawUpdateData.ingredients)
+        ? rawUpdateData.ingredients
+        : [];
+    }
+    if (rawUpdateData.steps !== undefined) {
+      cleanUpdate.steps = Array.isArray(rawUpdateData.steps)
+        ? rawUpdateData.steps
+        : [];
+    }
+    if (rawUpdateData.instructions !== undefined) {
+      cleanUpdate.instructions = Array.isArray(rawUpdateData.instructions)
+        ? rawUpdateData.instructions
+        : [];
+    }
+
+    // 3. Thực thi update lên Supabase
     const { data, error } = await supabase
       .from('recipes')
-      .update(sanitizedUpdate)
+      .update(cleanUpdate)
       .eq('id', id)
       .select();
 
     if (error) {
-      console.error('Lỗi Supabase PUT:', error.message);
+      console.error('Lỗi chi tiết Supabase PUT:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data[0]);
+    if (!data || data.length === 0) {
+      // Thử ép kiểu id thành number nếu id ban đầu là số
+      if (!isNaN(Number(id))) {
+        const retry = await supabase
+          .from('recipes')
+          .update(cleanUpdate)
+          .eq('id', Number(id))
+          .select();
+        if (retry.data && retry.data[0]) {
+          return NextResponse.json(retry.data[0]);
+        }
+      }
+    }
+
+    return NextResponse.json(data ? data[0] : { success: true });
   } catch (err) {
     console.error('Lỗi Server PUT:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

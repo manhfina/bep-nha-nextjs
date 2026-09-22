@@ -96,7 +96,7 @@ export default function EditRecipeModal({
     }
   };
 
-  // Trích xuất số điện thoại thuần túy (dạng chuỗi primitive, tránh dính object)
+  // Trích xuất số điện thoại an toàn dạng chuỗi thuần
   const getSafeUserPhone = () => {
     if (!currentUser) return '';
     try {
@@ -123,7 +123,7 @@ export default function EditRecipeModal({
     setLoading(true);
 
     try {
-      // 1. Chuẩn hóa nguyên liệu thành mảng Object thuần
+      // 1. Chuẩn hóa danh sách nguyên liệu
       const ingredientsArray = String(formData.ingredients || '')
         .split('\n')
         .map((item) => item.trim())
@@ -134,7 +134,7 @@ export default function EditRecipeModal({
           unit: '',
         }));
 
-      // 2. Chuẩn hóa các bước nấu thành mảng chuỗi thuần
+      // 2. Chuẩn hóa danh sách các bước nấu
       const instructionsArray = String(formData.instructions || '')
         .split('\n')
         .map((item) => item.trim())
@@ -144,8 +144,8 @@ export default function EditRecipeModal({
       const phoneStr = getSafeUserPhone();
       const finalImg = String(formData.image_url || previewImage || '');
 
-      // 3. Đóng gói Payload: Chỉ dùng các kiểu dữ liệu nguyên thủy (String, Number, Array)
-      const cleanPayload = {
+      // 3. Khởi tạo đối tượng cập nhật thuần túy
+      const rawPayload = {
         id: recipe.id,
         title: String(formData.title || '').trim(),
         desc: String(formData.description || '').trim(),
@@ -158,8 +158,10 @@ export default function EditRecipeModal({
         ingredients: ingredientsArray,
         steps: instructionsArray,
         instructions: instructionsArray,
-        requesterPhone: phoneStr,
       };
+
+      // 4. Ép kiểu chuẩn JSON triệt để, loại bỏ toàn bộ dữ liệu không hợp lệ
+      const cleanPayload = JSON.parse(JSON.stringify(rawPayload));
 
       const res = await fetch('/api/recipes', {
         method: 'PUT',
@@ -170,17 +172,17 @@ export default function EditRecipeModal({
         body: JSON.stringify(cleanPayload),
       });
 
+      const responseData = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || `Lỗi máy chủ (${res.status})`);
+        throw new Error(responseData.error || `Lỗi máy chủ (${res.status})`);
       }
 
-      const updated = await res.json();
-      onRecipeUpdated(updated);
+      onRecipeUpdated(responseData);
       onClose();
       alert('🎉 Cập nhật công thức thành công!');
     } catch (err) {
-      alert('Lỗi: ' + err.message);
+      alert('Lỗi: ' + (err.message || 'Không thể cập nhật'));
     } finally {
       setLoading(false);
     }
