@@ -3,27 +3,35 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
-  const [authMethod, setAuthMethod] = useState('phone'); // 'phone' hoặc 'email'
+  const [authMethod, setAuthMethod] = useState('phone'); // 'phone' | 'email'
   const [isSignUp, setIsSignUp] = useState(false);
-  
+
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   if (!isOpen) return null;
 
+  // Chuẩn hóa định dạng định danh đăng nhập
   const getIdentifier = () => {
     if (authMethod === 'phone') {
       const cleanPhone = phone.trim().replace(/\D/g, '');
       if (cleanPhone.length < 9 || cleanPhone.length > 11) {
         throw new Error('Số điện thoại không hợp lệ (cần từ 9 - 11 chữ số)');
       }
-      return `${cleanPhone}@phone.bepnha.com`;
+      // Dùng domain vercel.app hợp lệ để vượt qua bộ lọc Auth Email của Supabase
+      return `${cleanPhone}@bep-nha-nextjs.vercel.app`;
     }
-    return email.trim().toLowerCase();
+    
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      throw new Error('Địa chỉ email không đúng định dạng');
+    }
+    return cleanEmail;
   };
 
   const handleAuth = async (e) => {
@@ -32,7 +40,12 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
     setErrorMsg('');
 
     try {
+      if (!password || password.length < 6) {
+        throw new Error('Mật khẩu phải có tối thiểu 6 ký tự');
+      }
+
       const loginId = getIdentifier();
+      const cleanPhone = phone.trim().replace(/\D/g, '');
 
       if (isSignUp) {
         const { data, error } = await supabase.auth.signUp({
@@ -40,12 +53,20 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           password: password,
           options: {
             data: {
-              raw_phone: authMethod === 'phone' ? phone.trim() : null,
+              raw_phone: authMethod === 'phone' ? cleanPhone : null,
               login_type: authMethod,
+              display_name: authMethod === 'phone' ? `Bếp ${cleanPhone.slice(-4)}` : loginId.split('@')[0],
             },
           },
         });
+
         if (error) throw error;
+
+        // Nếu Supabase yêu cầu xác thực email mà chưa tắt Confirm Email
+        if (data?.user && (!data.session && !data.user.identities?.length)) {
+          throw new Error('Tài khoản đã tồn tại hoặc đang chờ xác minh email!');
+        }
+
         alert('🎉 Đăng ký tài khoản thành công!');
         if (onAuthSuccess) onAuthSuccess(data.user);
         onClose();
@@ -54,6 +75,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           email: loginId,
           password: password,
         });
+
         if (error) throw error;
         if (onAuthSuccess) onAuthSuccess(data.user);
         onClose();
@@ -62,10 +84,12 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
       const msg = err.message || '';
       if (msg.includes('Invalid login credentials')) {
         setErrorMsg('Sai số điện thoại/email hoặc mật khẩu!');
-      } else if (msg.includes('already registered')) {
+      } else if (msg.includes('User already registered') || msg.includes('already registered')) {
         setErrorMsg('Tài khoản này đã được đăng ký trước đó!');
+      } else if (msg.includes('Email domain not allowed') || msg.includes('invalid domain')) {
+        setErrorMsg('Tên miền xác thực không được hỗ trợ bởi hệ thống.');
       } else {
-        setErrorMsg(msg || 'Đã có lỗi xảy ra');
+        setErrorMsg(msg || 'Đã có lỗi xảy ra, vui lòng thử lại.');
       }
     } finally {
       setLoading(false);
@@ -75,7 +99,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} style={styles.closeBtn}>✕</button>
+        <button onClick={onClose} style={styles.closeBtn} aria-label="Đóng">✕</button>
 
         <div style={{ textAlign: 'center', marginBottom: '16px' }}>
           <span style={{ fontSize: '2rem' }}>👨‍🍳</span>
@@ -85,7 +109,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           </p>
         </div>
 
-        {/* Tab chuyển đổi */}
+        {/* Tab chuyển đổi Số điện thoại / Email */}
         <div style={styles.tabContainer}>
           <button
             type="button"
@@ -126,6 +150,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 style={styles.input}
+                autoComplete="tel"
               />
             </div>
           ) : (
@@ -138,6 +163,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={styles.input}
+                autoComplete="email"
               />
             </div>
           )}
@@ -151,6 +177,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               style={styles.input}
+              autoComplete="current-password"
             />
           </div>
 
@@ -192,9 +219,14 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
 const styles = {
   overlay: {
     position: 'fixed',
-    top: 0, left: 0, right: 0, bottom: 0,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 10002,
     padding: '20px',
   },
@@ -211,10 +243,19 @@ const styles = {
   },
   closeBtn: {
     position: 'absolute',
-    top: '18px', right: '18px',
-    background: '#f1f2f6', border: 'none',
-    borderRadius: '50%', width: '32px', height: '32px',
-    cursor: 'pointer', fontWeight: 'bold', color: '#666',
+    top: '18px',
+    right: '18px',
+    background: '#f1f2f6',
+    border: 'none',
+    borderRadius: '50%',
+    width: '32px',
+    height: '32px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    color: '#666',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     margin: '6px 0 0 0',
@@ -240,6 +281,7 @@ const styles = {
     fontWeight: '600',
     color: '#636e72',
     cursor: 'pointer',
+    transition: 'all 0.2s ease',
   },
   tabActive: {
     background: '#fff',

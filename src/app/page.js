@@ -448,10 +448,17 @@ export default function Home() {
     selectedDifficulty !== 'all' ||
     selectedTimeRange !== 'all';
 
+  // Lấy tên hiển thị chuẩn hóa cho người dùng (hỗ trợ cả domain mới và cũ)
   const getUserDisplayName = () => {
     if (!user) return '';
+    if (user.user_metadata?.raw_phone) {
+      return user.user_metadata.raw_phone;
+    }
     const email = user.email || '';
-    if (email.includes('@phone.bepnha.com')) {
+    if (email.endsWith('@bep-nha-nextjs.vercel.app')) {
+      return email.replace('@bep-nha-nextjs.vercel.app', '');
+    }
+    if (email.endsWith('@phone.bepnha.com')) {
       return email.replace('@phone.bepnha.com', '');
     }
     return email.split('@')[0];
