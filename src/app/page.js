@@ -961,13 +961,15 @@ export default function Home() {
       />
 
       {/* Modal Dọn tủ lạnh */}
-      <FridgeCleanerModal
-        isOpen={isFridgeOpen}
-        recipes={recipes}
-        onClose={() => setIsFridgeOpen(false)}
-        onOpenDetail={openDetail}
-        onAddMissingToCart={handleAddMissingToCart}
-      />
+          <FridgeCleanerModal
+            isOpen={isFridgeOpen}
+            onClose={() => setIsFridgeOpen(false)}
+            recipes={recipes}
+            fridgeItems={fridgeItems}
+            onUpdateFridge={setFridgeItems}
+            onOpenDetail={handleOpenDetail}
+            onAddMissingToCart={handleAddMissingToCart}
+          />
 
       {/* Modal Lên lịch thực đơn tuần */}
       <MealPlannerModal
