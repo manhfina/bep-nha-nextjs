@@ -15,6 +15,7 @@ import AuthModal from '../components/AuthModal';
 import FamilyKitchenModal from '../components/FamilyKitchenModal';
 import AdminRolesModal from '../components/AdminRolesModal';
 import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
+import { getCachedData, setCachedData, fetchWithDedupe, CacheKeys } from '@/lib/cacheManager';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
@@ -100,35 +101,27 @@ export default function Home() {
     steps: item.steps || item.instructions || [],
   });
 
-  // 1. Tải công thức từ API
+  // 1. Tải công thức với cơ chế SWR (Ưu tiên nạp cache 0ms, cập nhật ngầm)
   const fetchRecipes = async () => {
-    setLoading(true);
+    const cached = getCachedData(CacheKeys.RECIPES);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      setRecipes(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     try {
-      const res = await fetch(`/api/recipes?t=${Date.now()}`, {
+      const data = await fetchWithDedupe(`/api/recipes?t=${Date.now()}`, {
         cache: 'no-store',
       });
-      const data = await res.json();
       if (Array.isArray(data)) {
         const formatted = data.map(formatRecipe);
         setRecipes(formatted);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('cached_recipes', JSON.stringify(formatted));
-        }
-      } else {
-        throw new Error('Dữ liệu không phải mảng');
+        setCachedData(CacheKeys.RECIPES, formatted);
       }
     } catch (err) {
-      console.warn('Đang nạp cache offline:', err);
-      if (typeof window !== 'undefined') {
-        const cached = localStorage.getItem('cached_recipes');
-        if (cached) {
-          try {
-            setRecipes(JSON.parse(cached));
-          } catch (e) {
-            console.error('Lỗi parse cache:', e);
-          }
-        }
-      }
+      console.warn('Lỗi tải recipes ngầm, giữ cache offline:', err);
     } finally {
       setLoading(false);
     }
@@ -171,27 +164,21 @@ export default function Home() {
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
   };
 
-  // 4. Tải từ điển giá
+  // 4. Tải từ điển giá với cơ chế Cache-First
   const fetchPrices = async () => {
+    const cachedPrices = getCachedData(CacheKeys.PRICES);
+    if (cachedPrices && Object.keys(cachedPrices).length > 0) {
+      setPriceMap(cachedPrices);
+    }
+
     try {
-      const res = await fetch('/api/prices');
-      const data = await res.json();
+      const data = await fetchWithDedupe('/api/prices');
       if (data && !data.error) {
         setPriceMap(data);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('cached_prices', JSON.stringify(data));
-        }
+        setCachedData(CacheKeys.PRICES, data);
       }
     } catch (err) {
-      console.warn('Đọc giá từ cache:', err);
-      if (typeof window !== 'undefined') {
-        const cachedPrices = localStorage.getItem('cached_prices');
-        if (cachedPrices) {
-          try {
-            setPriceMap(JSON.parse(cachedPrices));
-          } catch (e) {}
-        }
-      }
+      console.warn('Lỗi fetch prices, giữ cache hiện tại:', err);
     }
   };
 
@@ -243,21 +230,21 @@ export default function Home() {
             setRecipes((prev) => {
               if (prev.some((r) => String(r.id) === String(newFormatted.id))) return prev;
               const next = [newFormatted, ...prev];
-              localStorage.setItem('cached_recipes', JSON.stringify(next));
+              setCachedData(CacheKeys.RECIPES, next);
               return next;
             });
           } else if (payload.eventType === 'UPDATE') {
             const updatedFormatted = formatRecipe(payload.new);
             setRecipes((prev) => {
               const next = prev.map((r) => (String(r.id) === String(updatedFormatted.id) ? updatedFormatted : r));
-              localStorage.setItem('cached_recipes', JSON.stringify(next));
+              setCachedData(CacheKeys.RECIPES, next);
               return next;
             });
             setActiveRecipe((prev) => (String(prev?.id) === String(updatedFormatted.id) ? updatedFormatted : prev));
           } else if (payload.eventType === 'DELETE') {
             setRecipes((prev) => {
               const next = prev.filter((r) => String(r.id) !== String(payload.old.id));
-              localStorage.setItem('cached_recipes', JSON.stringify(next));
+              setCachedData(CacheKeys.RECIPES, next);
               return next;
             });
             setActiveRecipe((prev) => (String(prev?.id) === String(payload.old.id) ? null : prev));
@@ -323,9 +310,7 @@ export default function Home() {
 
       setRecipes((prev) => {
         const next = prev.filter((r) => String(r.id) !== String(id));
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('cached_recipes', JSON.stringify(next));
-        }
+        setCachedData(CacheKeys.RECIPES, next);
         return next;
       });
 
@@ -488,7 +473,7 @@ export default function Home() {
     setRecipes((prev) => {
       if (prev.some((r) => String(r.id) === String(formattedItem.id))) return prev;
       const next = [formattedItem, ...prev];
-      localStorage.setItem('cached_recipes', JSON.stringify(next));
+      setCachedData(CacheKeys.RECIPES, next);
       return next;
     });
   };
@@ -497,7 +482,7 @@ export default function Home() {
     const formatted = formatRecipe(updatedRecipe);
     setRecipes((prev) => {
       const next = prev.map((r) => (String(r.id) === String(formatted.id) ? formatted : r));
-      localStorage.setItem('cached_recipes', JSON.stringify(next));
+      setCachedData(CacheKeys.RECIPES, next);
       return next;
     });
     if (String(activeRecipe?.id) === String(formatted.id)) setActiveRecipe(formatted);

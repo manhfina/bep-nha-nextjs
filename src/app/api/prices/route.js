@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-// GET: Lấy toàn bộ từ điển giá hiện có
+// GET: Lấy toàn bộ từ điển giá hiện có (Kèm Edge Caching Header)
 export async function GET() {
   try {
     const { data, error } = await supabase
@@ -16,10 +16,19 @@ export async function GET() {
     // Chuyển array thành map key-value theo tên để tra cứu O(1)
     const priceMap = {};
     (data || []).forEach((item) => {
-      priceMap[item.name.toLowerCase()] = item;
+      if (item.name) {
+        priceMap[item.name.toLowerCase().trim()] = item;
+      }
     });
 
-    return NextResponse.json(priceMap);
+    // Trả về kèm Header Cache Control:
+    // Browser cache 1 tiếng, CDN Edge cache 12 tiếng, tự validate ngầm
+    return NextResponse.json(priceMap, {
+      status: 200,
+      headers: {
+        'Cache-Control': 'public, s-maxage=43200, stale-while-revalidate=86400',
+      },
+    });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
