@@ -13,18 +13,22 @@ import FridgeCleanerModal from '../components/FridgeCleanerModal';
 import MealPlannerModal from '../components/MealPlannerModal';
 import AuthModal from '../components/AuthModal';
 import FamilyKitchenModal from '../components/FamilyKitchenModal';
+import AdminRolesModal from '../components/AdminRolesModal';
+import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState([]);
   const [shoppingList, setShoppingList] = useState([]);
-  
-  // Bảng giá nguyên liệu (Market Price Dictionary)
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+
+  // Bảng giá nguyên liệu
   const [priceMap, setPriceMap] = useState({});
 
-  // Auth & Family Kitchen state
+  // Auth, Roles & Family Kitchen state
   const [user, setUser] = useState(null);
+  const [userRole, setUserRole] = useState('viewer');
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [kitchenData, setKitchenData] = useState(null);
   const [isKitchenOpen, setIsKitchenOpen] = useState(false);
@@ -96,7 +100,7 @@ export default function Home() {
     }
   };
 
-  // 3. Tải favorites và shopping-list theo User hoặc Bếp
+  // 3. Tải favorites và shopping-list
   const loadUserData = (currentUserId, currentKitchenId) => {
     const params = new URLSearchParams();
     if (currentUserId) params.set('userId', currentUserId);
@@ -118,7 +122,7 @@ export default function Home() {
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
   };
 
-  // 4. Tải từ điển giá nguyên liệu
+  // 4. Tải từ điển giá
   const fetchPrices = async () => {
     try {
       const res = await fetch('/api/prices');
@@ -178,12 +182,22 @@ export default function Home() {
     };
   }, []);
 
-  // Tải thông tin bếp khi user thay đổi
+  // Kiểm tra vai trò / quyền của người dùng khi user thay đổi
   useEffect(() => {
     if (user) {
       fetchKitchen(user.id);
+      const phone = extractUserPhone(user);
+      if (phone) {
+        fetch(`/api/roles?phone=${phone}`)
+          .then((res) => res.json())
+          .then((data) => setUserRole(data.role || 'viewer'))
+          .catch(() => setUserRole('viewer'));
+      } else {
+        setUserRole('viewer');
+      }
     } else {
       setKitchenData(null);
+      setUserRole('viewer');
       loadUserData(null, null);
     }
   }, [user]);
@@ -195,7 +209,7 @@ export default function Home() {
     }
   }, [kitchenData, user]);
 
-  // Tự động mở chi tiết món ăn khi người dùng truy cập từ Link chia sẻ / Mã QR (?recipe=ID)
+  // Mở chi tiết món ăn từ link chia sẻ / QR
   useEffect(() => {
     if (recipes.length > 0 && typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
@@ -210,7 +224,10 @@ export default function Home() {
     }
   }, [recipes]);
 
-  // Xử lý Tìm kiếm bằng giọng nói tiếng Việt
+  // Biến cờ kiểm tra quyền Quản lý công thức (Sửa/Xóa)
+  const hasPermission = canManageRecipe(user, { role: userRole });
+
+  // Xử lý Tìm kiếm giọng nói tiếng Việt
   const handleVoiceSearch = () => {
     const SpeechRecognition =
       typeof window !== 'undefined' &&
@@ -290,7 +307,7 @@ export default function Home() {
     setServings(recipe.baseServings || 2);
   };
 
-  // Thêm nguyên liệu từ chi tiết món vào Giỏ
+  // Thêm nguyên liệu vào giỏ
   const addToCart = async () => {
     if (!activeRecipe) return;
 
@@ -324,7 +341,7 @@ export default function Home() {
     }
   };
 
-  // Thêm nguyên liệu còn thiếu từ Dọn tủ lạnh vào giỏ
+  // Thêm nguyên liệu thiếu vào giỏ
   const handleAddMissingToCart = async (dishTitle, missingItems) => {
     const newItems = missingItems.map((text) => ({
       dish: dishTitle,
@@ -351,7 +368,7 @@ export default function Home() {
     }
   };
 
-  // Nạp toàn bộ món trong thực đơn tuần vào giỏ
+  // Nạp toàn bộ thực đơn tuần vào giỏ
   const handleAddPlanToCart = async (plannedRecipes) => {
     const newItems = [];
     plannedRecipes.forEach((recipe) => {
@@ -401,10 +418,15 @@ export default function Home() {
     if (activeRecipe?.id === formatted.id) setActiveRecipe(formatted);
   };
 
+  // Xóa công thức có kèm kiểm tra quyền
   const handleDeleteRecipe = async (id) => {
+    const phone = extractUserPhone(user);
     try {
-      const res = await fetch(`/api/recipes?id=${id}`, {
+      const res = await fetch(`/api/recipes?id=${id}&phone=${phone || ''}`, {
         method: 'DELETE',
+        headers: {
+          'x-user-phone': phone || '',
+        },
       });
 
       if (!res.ok) {
@@ -465,7 +487,7 @@ export default function Home() {
     selectedDifficulty !== 'all' ||
     selectedTimeRange !== 'all';
 
-  // Lấy tên hiển thị chuẩn hóa cho người dùng
+  // Lấy tên hiển thị chuẩn hóa
   const getUserDisplayName = () => {
     if (!user) return '';
     if (user.user_metadata?.raw_phone) {
@@ -498,6 +520,7 @@ export default function Home() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {user ? (
             <>
+              {/* Nút vào Bếp gia đình */}
               <button
                 onClick={() => setIsKitchenOpen(true)}
                 style={{
@@ -517,6 +540,28 @@ export default function Home() {
                 🏡 {kitchenData?.kitchen ? kitchenData.kitchen.name : 'Vào Bếp gia đình'}
               </button>
 
+              {/* Nút Phân quyền: Đặt độc lập bên ngoài, chỉ hiện cho Admin */}
+              {isUserAdmin(user, { role: userRole }) && (
+                <button
+                  onClick={() => setIsAdminModalOpen(true)}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #e74c3c',
+                    background: '#fff5f5',
+                    color: '#e74c3c',
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    fontWeight: '700',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  🛡️ Phân quyền
+                </button>
+              )}
+
               <span
                 style={{
                   fontSize: '0.85rem',
@@ -525,9 +570,40 @@ export default function Home() {
                   background: '#f1f2f6',
                   padding: '6px 12px',
                   borderRadius: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
                 }}
               >
-                👤 {getUserDisplayName()}
+                <span>👤 {getUserDisplayName()}</span>
+                {userRole === 'admin' && (
+                  <span
+                    style={{
+                      fontSize: '0.7rem',
+                      background: '#e74c3c',
+                      color: '#fff',
+                      padding: '2px 6px',
+                      borderRadius: '6px',
+                      fontWeight: '800',
+                    }}
+                  >
+                    ADMIN
+                  </span>
+                )}
+                {userRole === 'editor' && (
+                  <span
+                    style={{
+                      fontSize: '0.7rem',
+                      background: '#27ae60',
+                      color: '#fff',
+                      padding: '2px 6px',
+                      borderRadius: '6px',
+                      fontWeight: '800',
+                    }}
+                  >
+                    ĐẦU BẾP
+                  </span>
+                )}
               </span>
 
               <button
@@ -535,6 +611,7 @@ export default function Home() {
                   await supabase.auth.signOut();
                   setUser(null);
                   setKitchenData(null);
+                  setUserRole('viewer');
                   alert('Đã đăng xuất!');
                 }}
                 style={{
@@ -646,12 +723,16 @@ export default function Home() {
         >
           📅 Lịch tuần
         </button>
-        <button onClick={() => setIsAddOpen(true)} className="btn-primary">
-          + Đăng công thức mới
-        </button>
+        
+        {/* Nút thêm công thức: Chỉ hiển thị cho Admin và Editor */}
+        {hasPermission && (
+          <button onClick={() => setIsAddOpen(true)} className="btn-primary">
+            + Đăng công thức mới
+          </button>
+        )}
       </div>
 
-      {/* Bộ lọc mở rộng: Tủ lạnh + Độ khó + Thời gian */}
+      {/* Bộ lọc mở rộng */}
       <div
         style={{
           display: 'flex',
@@ -775,7 +856,7 @@ export default function Home() {
               isFav={favorites.includes(String(recipe.id))}
               onToggleFav={toggleFavorite}
               onOpenDetail={openDetail}
-              onDelete={handleDeleteRecipe}
+              onDelete={hasPermission ? handleDeleteRecipe : null}
               priceMap={priceMap}
             />
           ))}
@@ -794,10 +875,10 @@ export default function Home() {
         onClose={() => setActiveRecipe(null)}
         onChangeServings={setServings}
         onAddToCart={addToCart}
-        onEdit={(rec) => {
+        onEdit={hasPermission ? (rec) => {
           setEditRecipe(rec);
           setActiveRecipe(null);
-        }}
+        } : null}
         onStartCook={() => {
           setCookModeRecipe(activeRecipe);
           setCookStep(0);
@@ -808,7 +889,7 @@ export default function Home() {
         priceMap={priceMap}
       />
 
-      {/* Modal Chế độ nấu ăn (Cook Mode + Wake Lock + Bấm giờ) */}
+      {/* Modal Chế độ nấu ăn */}
       <CookModeModal
         recipe={cookModeRecipe}
         step={cookStep}
@@ -868,6 +949,7 @@ export default function Home() {
         recipe={editRecipe}
         onClose={() => setEditRecipe(null)}
         onRecipeUpdated={handleRecipeUpdated}
+        currentUser={user}
       />
 
       {/* Modal Hôm nay ăn gì */}
@@ -912,6 +994,13 @@ export default function Home() {
         kitchenData={kitchenData}
         currentUserId={user?.id}
         onRefreshKitchen={() => fetchKitchen(user?.id)}
+      />
+
+      {/* Modal Quản lý Phân Quyền */}
+      <AdminRolesModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        currentUser={user}
       />
     </div>
   );

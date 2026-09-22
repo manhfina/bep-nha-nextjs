@@ -1,12 +1,19 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { extractUserPhone } from '@/lib/permissions';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-export default function EditRecipeModal({ isOpen, recipe, onClose, onRecipeUpdated }) {
+export default function EditRecipeModal({
+  isOpen,
+  recipe,
+  onClose,
+  onRecipeUpdated,
+  currentUser,
+}) {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewImage, setPreviewImage] = useState('');
@@ -94,6 +101,8 @@ export default function EditRecipeModal({ isOpen, recipe, onClose, onRecipeUpdat
         .map((item) => item.trim())
         .filter(Boolean);
 
+      const phone = extractUserPhone(currentUser);
+
       const payload = {
         id: recipe.id,
         title: formData.title,
@@ -103,11 +112,15 @@ export default function EditRecipeModal({ isOpen, recipe, onClose, onRecipeUpdat
         image: formData.image_url,
         ingredients: ingredientsArray,
         steps: instructionsArray,
+        requesterPhone: phone,
       };
 
       const res = await fetch('/api/recipes', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-phone': phone || '',
+        },
         body: JSON.stringify(payload),
       });
 
