@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 
-// Tự động làm sạch key, loại bỏ khoảng trắng hoặc ký tự xuống dòng nếu có
 const rawKey = process.env.GEMINI_API_KEY || '';
 const apiKey = rawKey.trim().replace(/[\r\n\t]/g, '');
 
@@ -9,31 +8,21 @@ const CANDIDATE_MODELS = [
   'gemini-2.5-pro',
 ];
 
-function extractJsonFromText(rawText) {
-  if (!rawText) return null;
-  let cleaned = rawText.trim();
+function extractJson(text) {
+  if (!text) return null;
+  let cleaned = text.trim();
   cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
 
-  const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1) {
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start !== -1 && end !== -1) {
     try {
-      return JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+      return JSON.parse(cleaned.substring(start, end + 1));
     } catch (e) {}
   }
-
-  const firstBracket = cleaned.indexOf('[');
-  const lastBracket = cleaned.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket !== -1) {
-    try {
-      return JSON.parse(cleaned.substring(firstBracket, lastBracket + 1));
-    } catch (e) {}
-  }
-
   return JSON.parse(cleaned);
 }
 
-// Gọi API Gemini: endpoint tĩnh hoàn toàn, truyền key qua Header x-goog-api-key
 async function callGemini(promptText) {
   if (!apiKey) {
     throw new Error('Chưa cấu hình GEMINI_API_KEY trong Environment Variables');
@@ -42,10 +31,10 @@ async function callGemini(promptText) {
   let lastError = null;
 
   for (const model of CANDIDATE_MODELS) {
-    // URL cố định tuyệt đối, không ghép param key vào URL
-    const endpoint = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){model}:generateContent`;
+    // URL thuần túy, tuyệt đối không dính ký tự Markdown hay template literal lỗi
+    const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)' + model + ':generateContent';
 
-    const requestBody = {
+    const payload = {
       contents: [
         {
           role: 'user',
@@ -59,33 +48,30 @@ async function callGemini(promptText) {
     };
 
     try {
-      const response = await fetch(endpoint, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey,
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(payload),
         cache: 'no-store',
       });
 
-      const responseText = await response.text();
+      const resText = await res.text();
 
-      if (!response.ok) {
-        console.warn(`Model ${model} (${response.status}):`, responseText);
-        lastError = new Error(`Google API (${response.status}): ${responseText}`);
+      if (!res.ok) {
+        lastError = new Error(`Google API ${res.status}: ${resText}`);
         continue;
       }
 
-      const jsonResult = JSON.parse(responseText);
-      const textOutput = jsonResult?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (textOutput) {
-        const parsed = extractJsonFromText(textOutput);
+      const json = JSON.parse(resText);
+      const output = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (output) {
+        const parsed = extractJson(output);
         if (parsed) return parsed;
       }
     } catch (err) {
-      console.warn(`Lỗi gọi model ${model}:`, err.message);
       lastError = err;
     }
   }
@@ -98,57 +84,33 @@ export async function POST(request) {
     const body = await request.json().catch(() => ({}));
     const { action, text, imageBase64 } = body;
 
-    // 1. ACTION: Bóc tách công thức nấu ăn
     if (action === 'parse-recipe') {
       if (!text || !text.trim()) {
         return NextResponse.json({ error: 'Nội dung văn bản trống!' }, { status: 400 });
       }
 
-      const prompt = `
-Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản mô tả công thức nấu ăn bên dưới và chuyển đổi thành một đối tượng JSON hợp lệ theo đúng mẫu sau:
-
+      const prompt = `Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản và trích xuất thành JSON hợp lệ theo đúng cấu trúc:
 {
-  "title": "Tên món ăn (ngắn gọn, viết hoa chữ cái đầu)",
-  "desc": "Mô tả ngắn gọn về hương vị món ăn (1 câu)",
+  "title": "Tên món ăn",
+  "desc": "Mô tả ngắn gọn hương vị",
   "cook_time": 20,
   "difficulty": "Dễ",
   "base_servings": 2,
   "ingredients": [
-    {
-      "name": "Tên nguyên liệu",
-      "amountPerPerson": 100,
-      "unit": "g"
-    }
+    { "name": "Tên nguyên liệu", "amountPerPerson": 100, "unit": "g" }
   ],
-  "steps": [
-    "Bước 1: Sơ chế...",
-    "Bước 2: Chế biến..."
-  ]
+  "steps": ["Bước 1...", "Bước 2..."]
 }
 
-Quy định:
-1. "title": Bắt buộc có tên món ăn.
-2. "cook_time": Số nguyên phút.
-3. "difficulty": Chọn 1 trong 4 giá trị: "Rất dễ", "Dễ", "Trung bình", "Khó".
-4. "base_servings": Mặc định là 2.
-5. "ingredients": Mảng gồm { name, amountPerPerson, unit }.
-6. "steps": Danh sách mảng các bước nấu dạng chuỗi.
-
-Văn bản cần bóc tách:
+Văn bản:
 """
-${text}
+` + text + `
 """`;
 
-      const recipeData = await callGemini(prompt);
-
-      return NextResponse.json({
-        success: true,
-        data: recipeData,
-        ...recipeData,
-      });
+      const data = await callGemini(prompt);
+      return NextResponse.json({ success: true, data, ...data });
     }
 
-    // 2. ACTION: Quét ảnh tủ lạnh hoặc hóa đơn
     if (action === 'scan-vision') {
       if (!imageBase64) {
         return NextResponse.json({ error: 'Thiếu dữ liệu ảnh' }, { status: 400 });
@@ -157,7 +119,7 @@ ${text}
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
       const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)';
 
-      const visionBody = {
+      const payload = {
         contents: [
           {
             role: 'user',
@@ -168,9 +130,7 @@ ${text}
                   data: pureBase64,
                 },
               },
-              {
-                text: 'Hãy nhận diện các nguyên liệu nấu ăn trong ảnh. Trả về JSON mảng: [{"name": "tên thực phẩm", "quantity": 1, "unit": "kg"}]',
-              },
+              { text: 'Nhận diện nguyên liệu trong ảnh. Trả về JSON: [{"name": "tên", "quantity": 1, "unit": "kg"}]' },
             ],
           },
         ],
@@ -186,22 +146,17 @@ ${text}
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey,
         },
-        body: JSON.stringify(visionBody),
+        body: JSON.stringify(payload),
       });
 
       const resJson = await res.json();
-      const rawVision = resJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-      const items = extractJsonFromText(rawVision) || [];
-
+      const output = resJson?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const items = extractJson(output) || [];
       return NextResponse.json({ success: true, items });
     }
 
-    return NextResponse.json({ error: 'Hành động không hợp lệ' }, { status: 400 });
+    return NextResponse.json({ error: 'Action không hợp lệ' }, { status: 400 });
   } catch (err) {
-    console.error('Lỗi API /api/ai:', err.message);
-    return NextResponse.json(
-      { error: err.message || 'Không thể xử lý dữ liệu AI' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
