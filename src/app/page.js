@@ -19,6 +19,9 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState([]);
   const [shoppingList, setShoppingList] = useState([]);
+  
+  // Bảng giá nguyên liệu (Market Price Dictionary)
+  const [priceMap, setPriceMap] = useState({});
 
   // Auth & Family Kitchen state
   const [user, setUser] = useState(null);
@@ -115,9 +118,23 @@ export default function Home() {
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
   };
 
+  // 4. Tải từ điển giá nguyên liệu
+  const fetchPrices = async () => {
+    try {
+      const res = await fetch('/api/prices');
+      const data = await res.json();
+      if (data && !data.error) {
+        setPriceMap(data);
+      }
+    } catch (err) {
+      console.error('Lỗi tải bảng giá:', err);
+    }
+  };
+
   // Khởi tạo và lắng nghe phiên đăng nhập & Realtime Supabase
   useEffect(() => {
     fetchRecipes();
+    fetchPrices();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
@@ -448,7 +465,7 @@ export default function Home() {
     selectedDifficulty !== 'all' ||
     selectedTimeRange !== 'all';
 
-  // Lấy tên hiển thị chuẩn hóa cho người dùng (hỗ trợ cả domain mới và cũ)
+  // Lấy tên hiển thị chuẩn hóa cho người dùng
   const getUserDisplayName = () => {
     if (!user) return '';
     if (user.user_metadata?.raw_phone) {
@@ -759,6 +776,7 @@ export default function Home() {
               onToggleFav={toggleFavorite}
               onOpenDetail={openDetail}
               onDelete={handleDeleteRecipe}
+              priceMap={priceMap}
             />
           ))}
         </div>
@@ -787,6 +805,7 @@ export default function Home() {
         }}
         currentUser={user}
         currentKitchen={kitchenData?.kitchen}
+        priceMap={priceMap}
       />
 
       {/* Modal Chế độ nấu ăn (Cook Mode + Wake Lock + Bấm giờ) */}

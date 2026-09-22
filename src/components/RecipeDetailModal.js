@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import ShareRecipeModal from './ShareRecipeModal';
+import { calculateIngredientCost, calculateRecipeTotalCost } from '@/lib/priceCalculator';
 
 export default function RecipeDetailModal({
   recipe,
@@ -12,14 +13,15 @@ export default function RecipeDetailModal({
   onStartCook,
   currentUser,
   currentKitchen,
+  priceMap = {},
 }) {
-  const [activeTab, setActiveTab] = useState('recipe'); // 'recipe' hoặc 'notes'
+  const [activeTab, setActiveTab] = useState('recipe'); // 'recipe' | 'notes'
   const [notes, setNotes] = useState([]);
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [newRating, setNewRating] = useState(5);
   const [newNote, setNewNote] = useState('');
   const [submittingNote, setSubmittingNote] = useState(false);
-  
+
   // State mở modal chia sẻ QR
   const [isShareOpen, setIsShareOpen] = useState(false);
 
@@ -51,15 +53,22 @@ export default function RecipeDetailModal({
 
   if (!recipe) return null;
 
+  // Tính tổng chi phí theo khẩu phần hiện tại
+  const totalCost = calculateRecipeTotalCost(recipe, priceMap, servings);
+
   const handleAddNote = async (e) => {
     e.preventDefault();
     if (!newNote.trim()) return;
 
     setSubmittingNote(true);
     try {
-      const userIdentifier = currentUser?.email?.includes('@phone.bepnha.com')
-        ? currentUser.email.replace('@phone.bepnha.com', '')
-        : currentUser?.email?.split('@')[0] || 'Khách';
+      const userIdentifier =
+        currentUser?.user_metadata?.raw_phone ||
+        (currentUser?.email?.includes('@phone.bepnha.com')
+          ? currentUser.email.replace('@phone.bepnha.com', '')
+          : currentUser?.email?.includes('@bep-nha-nextjs.vercel.app')
+          ? currentUser.email.replace('@bep-nha-nextjs.vercel.app', '')
+          : currentUser?.email?.split('@')[0] || 'Khách');
 
       const res = await fetch('/api/recipe-notes', {
         method: 'POST',
@@ -107,7 +116,7 @@ export default function RecipeDetailModal({
     <>
       <div style={styles.overlay} onClick={onClose}>
         <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          <button onClick={onClose} style={styles.closeBtn} aria-label="Đóng">✕</button>
 
           {/* Ảnh và tiêu đề */}
           <div style={styles.imageContainer}>
@@ -152,6 +161,7 @@ export default function RecipeDetailModal({
           <div style={styles.bodyContent}>
             {activeTab === 'recipe' ? (
               <>
+                {/* Khẩu phần ăn */}
                 <div style={styles.servingsCard}>
                   <span style={{ fontSize: '0.9rem', fontWeight: '600', color: '#2d3436' }}>
                     Khẩu phần ăn:
@@ -173,21 +183,62 @@ export default function RecipeDetailModal({
                   </div>
                 </div>
 
+                {/* Hộp chi phí ước tính */}
+                {totalCost > 0 && (
+                  <div style={styles.costBox}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1.2rem' }}>💰</span>
+                      <div>
+                        <div style={{ fontSize: '0.8rem', color: '#27ae60', fontWeight: '600' }}>
+                          Ước tính chi phí chợ ({servings} người)
+                        </div>
+                        <div style={{ fontSize: '1.1rem', color: '#2d3436', fontWeight: '800' }}>
+                          ~{totalCost.toLocaleString('vi-VN')} đ
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: '#7f8c8d' }}>
+                      ~{Math.round(totalCost / servings).toLocaleString('vi-VN')} đ/người
+                    </span>
+                  </div>
+                )}
+
                 <h3 style={styles.sectionTitle}>Nguyên liệu cần chuẩn bị</h3>
                 <ul style={styles.ingredientList}>
-                  {(recipe.ingredients || []).map((item, idx) => (
-                    <li key={idx} style={styles.ingredientItem}>
-                      {typeof item === 'string' ? (
-                        item
-                      ) : (
-                        <span>
-                          <strong>{item.name}</strong>:{' '}
-                          {((item.amountPerPerson || 1) * servings).toFixed(1).replace(/\.0$/, '')}{' '}
-                          {item.unit}
-                        </span>
-                      )}
-                    </li>
-                  ))}
+                  {(recipe.ingredients || []).map((item, idx) => {
+                    const ingCostInfo = calculateIngredientCost(
+                      item,
+                      priceMap,
+                      recipe.baseServings || 2,
+                      servings
+                    );
+
+                    return (
+                      <li key={idx} style={styles.ingredientItem}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                          <span>
+                            {typeof item === 'string' ? (
+                              item
+                            ) : (
+                              <>
+                                <strong>{item.name}</strong>:{' '}
+                                {((item.amountPerPerson || 1) * servings)
+                                  .toFixed(1)
+                                  .replace(/\.0$/, '')}{' '}
+                                {item.unit}
+                              </>
+                            )}
+                          </span>
+
+                          {ingCostInfo?.cost > 0 && (
+                            <span style={styles.ingCostTag}>
+                              ~{ingCostInfo.cost.toLocaleString('vi-VN')}đ
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
 
                 <h3 style={styles.sectionTitle}>Các bước thực hiện</h3>
@@ -316,7 +367,7 @@ export default function RecipeDetailModal({
         </div>
       </div>
 
-      {/* Modal Chia Sẻ QR Code đặt ở ngoài cùng để không bị che khuất */}
+      {/* Modal Chia Sẻ QR Code */}
       <ShareRecipeModal
         isOpen={isShareOpen}
         recipe={recipe}
@@ -329,9 +380,14 @@ export default function RecipeDetailModal({
 const styles = {
   overlay: {
     position: 'fixed',
-    top: 0, left: 0, right: 0, bottom: 0,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 10000,
     padding: '16px',
   },
@@ -350,145 +406,280 @@ const styles = {
   },
   closeBtn: {
     position: 'absolute',
-    top: '16px', right: '16px',
+    top: '16px',
+    right: '16px',
     background: 'rgba(255, 255, 255, 0.9)',
-    border: 'none', borderRadius: '50%',
-    width: '32px', height: '32px',
-    cursor: 'pointer', fontWeight: 'bold',
+    border: 'none',
+    borderRadius: '50%',
+    width: '32px',
+    height: '32px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
     zIndex: 2,
   },
   imageContainer: {
-    position: 'relative', width: '100%', height: '180px',
+    position: 'relative',
+    width: '100%',
+    height: '180px',
   },
   image: {
-    width: '100%', height: '100%', objectFit: 'cover',
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
   },
   headerInfo: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     background: 'linear-gradient(to top, rgba(0,0,0,0.85), transparent)',
-    padding: '16px 20px 10px 20px', color: '#fff',
+    padding: '16px 20px 10px 20px',
+    color: '#fff',
   },
   title: {
-    margin: 0, fontSize: '1.35rem', fontWeight: '800',
+    margin: 0,
+    fontSize: '1.35rem',
+    fontWeight: '800',
   },
   metaRow: {
-    display: 'flex', gap: '14px', marginTop: '6px', fontSize: '0.82rem',
+    display: 'flex',
+    gap: '14px',
+    marginTop: '6px',
+    fontSize: '0.82rem',
     alignItems: 'center',
   },
   avgBadge: {
-    backgroundColor: '#f39c12', color: '#fff',
-    padding: '2px 8px', borderRadius: '6px', fontWeight: '700',
+    backgroundColor: '#f39c12',
+    color: '#fff',
+    padding: '2px 8px',
+    borderRadius: '6px',
+    fontWeight: '700',
   },
   tabsContainer: {
-    display: 'flex', borderBottom: '1px solid #edf2f7',
+    display: 'flex',
+    borderBottom: '1px solid #edf2f7',
     background: '#f8f9fa',
   },
   tabBtn: {
-    flex: 1, padding: '12px', border: 'none', background: 'transparent',
-    fontSize: '0.85rem', fontWeight: '700', color: '#718096',
-    cursor: 'pointer', borderBottom: '3px solid transparent',
+    flex: 1,
+    padding: '12px',
+    border: 'none',
+    background: 'transparent',
+    fontSize: '0.85rem',
+    fontWeight: '700',
+    color: '#718096',
+    cursor: 'pointer',
+    borderBottom: '3px solid transparent',
   },
   tabActive: {
-    color: '#e67e22', borderBottom: '3px solid #e67e22', background: '#fff',
+    color: '#e67e22',
+    borderBottom: '3px solid #e67e22',
+    background: '#fff',
   },
   bodyContent: {
-    padding: '18px 22px', overflowY: 'auto', flex: 1,
+    padding: '18px 22px',
+    overflowY: 'auto',
+    flex: 1,
   },
   servingsCard: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '10px 14px', backgroundColor: '#fffaf0',
-    border: '1px solid #feebc8', borderRadius: '12px', marginBottom: '14px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '10px 14px',
+    backgroundColor: '#fffaf0',
+    border: '1px solid #feebc8',
+    borderRadius: '12px',
+    marginBottom: '10px',
   },
   servingsControls: {
-    display: 'flex', alignItems: 'center', gap: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
   },
   servingsBtn: {
-    width: '28px', height: '28px', borderRadius: '8px',
-    border: '1px solid #cbd5e0', background: '#fff',
-    cursor: 'pointer', fontWeight: 'bold',
+    width: '28px',
+    height: '28px',
+    borderRadius: '8px',
+    border: '1px solid #cbd5e0',
+    background: '#fff',
+    cursor: 'pointer',
+    fontWeight: 'bold',
   },
   servingsValue: {
-    fontWeight: '700', fontSize: '0.9rem', minWidth: '65px', textAlign: 'center',
+    fontWeight: '700',
+    fontSize: '0.9rem',
+    minWidth: '65px',
+    textAlign: 'center',
+  },
+  costBox: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '10px 14px',
+    backgroundColor: '#eafaf1',
+    border: '1px solid #c2f0d4',
+    borderRadius: '12px',
+    marginBottom: '14px',
   },
   sectionTitle: {
-    fontSize: '0.95rem', margin: '14px 0 8px 0', color: '#2d3436', fontWeight: '700',
+    fontSize: '0.95rem',
+    margin: '14px 0 8px 0',
+    color: '#2d3436',
+    fontWeight: '700',
   },
   ingredientList: {
-    paddingLeft: '18px', margin: '0 0 14px 0', fontSize: '0.9rem', color: '#4a5568',
+    paddingLeft: '0',
+    listStyleType: 'none',
+    margin: '0 0 14px 0',
+    fontSize: '0.9rem',
+    color: '#4a5568',
   },
   ingredientItem: {
-    marginBottom: '5px',
+    padding: '8px 10px',
+    borderRadius: '8px',
+    backgroundColor: '#f8f9fa',
+    marginBottom: '6px',
+    display: 'flex',
+  },
+  ingCostTag: {
+    fontSize: '0.78rem',
+    color: '#27ae60',
+    fontWeight: '700',
+    backgroundColor: '#fff',
+    padding: '2px 6px',
+    borderRadius: '6px',
+    border: '1px solid #e1f5fe',
   },
   stepList: {
-    display: 'flex', flexDirection: 'column', gap: '10px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
   },
   stepItem: {
-    display: 'flex', gap: '10px', alignItems: 'flex-start',
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'flex-start',
   },
   stepBadge: {
-    width: '22px', height: '22px', borderRadius: '50%',
-    backgroundColor: '#e67e22', color: '#fff',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '0.75rem', fontWeight: 'bold', flexShrink: 0, marginTop: '2px',
+    width: '22px',
+    height: '22px',
+    borderRadius: '50%',
+    backgroundColor: '#e67e22',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '0.75rem',
+    fontWeight: 'bold',
+    flexShrink: 0,
+    marginTop: '2px',
   },
   stepText: {
-    margin: 0, fontSize: '0.88rem', color: '#2d3436', lineHeight: '1.5',
+    margin: 0,
+    fontSize: '0.88rem',
+    color: '#2d3436',
+    lineHeight: '1.5',
   },
   noteForm: {
-    backgroundColor: '#f8f9fa', padding: '14px', borderRadius: '14px',
-    border: '1px solid #edf2f7', marginBottom: '16px',
+    backgroundColor: '#f8f9fa',
+    padding: '14px',
+    borderRadius: '14px',
+    border: '1px solid #edf2f7',
+    marginBottom: '16px',
   },
   ratingPickerRow: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: '10px',
   },
   noteInput: {
-    width: '100%', padding: '10px', borderRadius: '10px',
-    border: '1px solid #dcdde1', fontSize: '0.85rem',
-    outline: 'none', boxSizing: 'border-box', resize: 'vertical',
+    width: '100%',
+    padding: '10px',
+    borderRadius: '10px',
+    border: '1px solid #dcdde1',
+    fontSize: '0.85rem',
+    outline: 'none',
+    boxSizing: 'border-box',
+    resize: 'vertical',
   },
   btnSaveNote: {
-    marginTop: '8px', backgroundColor: '#e67e22', color: '#fff',
-    border: 'none', padding: '8px 14px', borderRadius: '8px',
-    fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer',
+    marginTop: '8px',
+    backgroundColor: '#e67e22',
+    color: '#fff',
+    border: 'none',
+    padding: '8px 14px',
+    borderRadius: '8px',
+    fontWeight: '700',
+    fontSize: '0.82rem',
+    cursor: 'pointer',
   },
   emptyNotes: {
-    textAlign: 'center', padding: '30px 10px',
+    textAlign: 'center',
+    padding: '30px 10px',
   },
   notesFeed: {
-    display: 'flex', flexDirection: 'column', gap: '10px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
   },
   noteCard: {
-    backgroundColor: '#fff', padding: '12px 14px', borderRadius: '12px',
-    border: '1px solid #edf2f7', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+    backgroundColor: '#fff',
+    padding: '12px 14px',
+    borderRadius: '12px',
+    border: '1px solid #edf2f7',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
   },
   noteHeader: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: '6px',
   },
   starDisplay: {
     fontSize: '0.8rem',
   },
   btnDeleteNote: {
-    background: 'none', border: 'none', color: '#b2bec3',
-    cursor: 'pointer', fontSize: '0.85rem',
+    background: 'none',
+    border: 'none',
+    color: '#b2bec3',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
   },
   noteContent: {
-    margin: 0, fontSize: '0.88rem', color: '#2d3436', lineHeight: '1.45',
+    margin: 0,
+    fontSize: '0.88rem',
+    color: '#2d3436',
+    lineHeight: '1.45',
   },
   footer: {
-    display: 'flex', gap: '8px', padding: '14px 20px',
-    borderTop: '1px solid #edf2f7', background: '#fff',
+    display: 'flex',
+    gap: '8px',
+    padding: '14px 20px',
+    borderTop: '1px solid #edf2f7',
+    background: '#fff',
   },
   btnCook: {
-    flex: 2, backgroundColor: '#27ae60', color: '#fff',
-    border: 'none', padding: '11px', borderRadius: '12px',
-    fontWeight: '700', fontSize: '0.9rem', cursor: 'pointer',
+    flex: 2,
+    backgroundColor: '#27ae60',
+    color: '#fff',
+    border: 'none',
+    padding: '11px',
+    borderRadius: '12px',
+    fontWeight: '700',
+    fontSize: '0.9rem',
+    cursor: 'pointer',
   },
   btnCart: {
-    flex: 2, backgroundColor: '#e67e22', color: '#fff',
-    border: 'none', padding: '11px', borderRadius: '12px',
-    fontWeight: '700', fontSize: '0.9rem', cursor: 'pointer',
+    flex: 2,
+    backgroundColor: '#e67e22',
+    color: '#fff',
+    border: 'none',
+    padding: '11px',
+    borderRadius: '12px',
+    fontWeight: '700',
+    fontSize: '0.9rem',
+    cursor: 'pointer',
   },
   btnShareMini: {
     backgroundColor: '#3498db',
@@ -503,8 +694,14 @@ const styles = {
     justifyContent: 'center',
   },
   btnEdit: {
-    flex: 1, backgroundColor: '#f1f2f6', color: '#2d3436',
-    border: 'none', padding: '11px', borderRadius: '12px',
-    fontWeight: '600', fontSize: '0.9rem', cursor: 'pointer',
+    flex: 1,
+    backgroundColor: '#f1f2f6',
+    color: '#2d3436',
+    border: 'none',
+    padding: '11px',
+    borderRadius: '12px',
+    fontWeight: '600',
+    fontSize: '0.9rem',
+    cursor: 'pointer',
   },
 };
