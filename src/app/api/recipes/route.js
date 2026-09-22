@@ -123,7 +123,7 @@ export async function PUT(request) {
     if (rawUpdateData.image !== undefined) cleanUpdate.image = String(rawUpdateData.image);
     if (rawUpdateData.image_url !== undefined) cleanUpdate.image_url = String(rawUpdateData.image_url);
 
-    // Xử lý an toàn cho mảng ingredients và steps
+    // Mảng JSON cho ingredients và steps
     if (rawUpdateData.ingredients !== undefined) {
       cleanUpdate.ingredients = Array.isArray(rawUpdateData.ingredients)
         ? rawUpdateData.ingredients
@@ -134,39 +134,29 @@ export async function PUT(request) {
         ? rawUpdateData.steps
         : [];
     }
-    if (rawUpdateData.instructions !== undefined) {
-      cleanUpdate.instructions = Array.isArray(rawUpdateData.instructions)
-        ? rawUpdateData.instructions
-        : [];
-    }
 
-    // 3. Thực thi update lên Supabase
-    const { data, error } = await supabase
+    // 3. Thực thi cập nhật Supabase
+    let result = await supabase
       .from('recipes')
       .update(cleanUpdate)
       .eq('id', id)
       .select();
 
-    if (error) {
-      console.error('Lỗi chi tiết Supabase PUT:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // Nếu không khớp chuỗi UUID, thử ép kiểu sang Number
+    if ((!result.data || result.data.length === 0) && !isNaN(Number(id))) {
+      result = await supabase
+        .from('recipes')
+        .update(cleanUpdate)
+        .eq('id', Number(id))
+        .select();
     }
 
-    if (!data || data.length === 0) {
-      // Thử ép kiểu id thành number nếu id ban đầu là số
-      if (!isNaN(Number(id))) {
-        const retry = await supabase
-          .from('recipes')
-          .update(cleanUpdate)
-          .eq('id', Number(id))
-          .select();
-        if (retry.data && retry.data[0]) {
-          return NextResponse.json(retry.data[0]);
-        }
-      }
+    if (result.error) {
+      console.error('Lỗi chi tiết Supabase PUT:', result.error);
+      return NextResponse.json({ error: result.error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data ? data[0] : { success: true });
+    return NextResponse.json(result.data?.[0] || { success: true, id });
   } catch (err) {
     console.error('Lỗi Server PUT:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

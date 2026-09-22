@@ -96,7 +96,7 @@ export default function EditRecipeModal({
     }
   };
 
-  // Trích xuất số điện thoại an toàn dạng chuỗi thuần
+  // Trích xuất số điện thoại sạch dạng chuỗi
   const getSafeUserPhone = () => {
     if (!currentUser) return '';
     try {
@@ -123,7 +123,7 @@ export default function EditRecipeModal({
     setLoading(true);
 
     try {
-      // 1. Chuẩn hóa danh sách nguyên liệu
+      // Chuẩn hóa nguyên liệu
       const ingredientsArray = String(formData.ingredients || '')
         .split('\n')
         .map((item) => item.trim())
@@ -134,7 +134,7 @@ export default function EditRecipeModal({
           unit: '',
         }));
 
-      // 2. Chuẩn hóa danh sách các bước nấu
+      // Chuẩn hóa các bước
       const instructionsArray = String(formData.instructions || '')
         .split('\n')
         .map((item) => item.trim())
@@ -142,10 +142,10 @@ export default function EditRecipeModal({
         .map((line) => String(line));
 
       const phoneStr = getSafeUserPhone();
-      const finalImg = String(formData.image_url || previewImage || '');
+      const finalImg = String(formData.image_url || previewImage || '').trim();
 
-      // 3. Khởi tạo đối tượng cập nhật thuần túy
-      const rawPayload = {
+      // Đóng gói payload thuần túy
+      const payload = {
         id: recipe.id,
         title: String(formData.title || '').trim(),
         desc: String(formData.description || '').trim(),
@@ -157,11 +157,7 @@ export default function EditRecipeModal({
         image_url: finalImg,
         ingredients: ingredientsArray,
         steps: instructionsArray,
-        instructions: instructionsArray,
       };
-
-      // 4. Ép kiểu chuẩn JSON triệt để, loại bỏ toàn bộ dữ liệu không hợp lệ
-      const cleanPayload = JSON.parse(JSON.stringify(rawPayload));
 
       const res = await fetch('/api/recipes', {
         method: 'PUT',
@@ -169,7 +165,7 @@ export default function EditRecipeModal({
           'Content-Type': 'application/json',
           'x-user-phone': phoneStr,
         },
-        body: JSON.stringify(cleanPayload),
+        body: JSON.stringify(payload),
       });
 
       const responseData = await res.json().catch(() => ({}));
