@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { extractUserPhone } from '@/lib/permissions';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -29,17 +28,18 @@ export default function EditRecipeModal({
 
   useEffect(() => {
     if (recipe) {
-      const ingText = (recipe.ingredients || [])
-        .map((ing) => {
-          if (typeof ing === 'string') return ing;
-          return ing.name || '';
-        })
-        .filter(Boolean)
-        .join('\n');
+      const ingList = recipe.ingredients || [];
+      const ingText = Array.isArray(ingList)
+        ? ingList
+            .map((ing) => (typeof ing === 'string' ? ing : ing?.name || ''))
+            .filter(Boolean)
+            .join('\n')
+        : '';
 
-      const stepText = (recipe.steps || recipe.instructions || [])
-        .filter(Boolean)
-        .join('\n');
+      const stepList = recipe.steps || recipe.instructions || [];
+      const stepText = Array.isArray(stepList)
+        ? stepList.filter(Boolean).join('\n')
+        : '';
 
       const parsedTime = parseInt(recipe.time) || parseInt(recipe.cook_time) || 15;
       const initialImg = recipe.image || recipe.image_url || '';
@@ -68,7 +68,6 @@ export default function EditRecipeModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Tạo link tạm thời để preview nhanh
     setPreviewImage(URL.createObjectURL(file));
     setUploading(true);
 
@@ -97,60 +96,83 @@ export default function EditRecipeModal({
     }
   };
 
+  // Trích xuất số điện thoại thuần túy (dạng chuỗi primitive, tránh dính object)
+  const getSafeUserPhone = () => {
+    if (!currentUser) return '';
+    try {
+      if (currentUser.user_metadata?.raw_phone) {
+        return String(currentUser.user_metadata.raw_phone).trim();
+      }
+      const email = String(currentUser.email || '').trim();
+      if (email.endsWith('@bep-nha-nextjs.vercel.app')) {
+        return email.replace('@bep-nha-nextjs.vercel.app', '');
+      }
+      if (email.endsWith('@phone.bepnha.com')) {
+        return email.replace('@phone.bepnha.com', '');
+      }
+      const firstPart = email.split('@')[0];
+      if (/^\d+$/.test(firstPart)) return firstPart;
+    } catch (e) {
+      console.error(e);
+    }
+    return '';
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      // 1. Chuẩn hóa danh sách nguyên liệu
-      const ingredientsArray = formData.ingredients
+      // 1. Chuẩn hóa nguyên liệu thành mảng Object thuần
+      const ingredientsArray = String(formData.ingredients || '')
         .split('\n')
         .map((item) => item.trim())
         .filter(Boolean)
         .map((line) => ({
-          name: line,
+          name: String(line),
           amountPerPerson: 1,
           unit: '',
         }));
 
-      // 2. Chuẩn hóa danh sách các bước nấu
-      const instructionsArray = formData.instructions
+      // 2. Chuẩn hóa các bước nấu thành mảng chuỗi thuần
+      const instructionsArray = String(formData.instructions || '')
         .split('\n')
         .map((item) => item.trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .map((line) => String(line));
 
-      const phone = extractUserPhone(currentUser) || '';
-      const finalImage = formData.image_url || previewImage || '';
+      const phoneStr = getSafeUserPhone();
+      const finalImg = String(formData.image_url || previewImage || '');
 
-      // 3. Đóng gói payload sạch sẽ (đảm bảo 100% JSON serializable)
-      const payload = {
+      // 3. Đóng gói Payload: Chỉ dùng các kiểu dữ liệu nguyên thủy (String, Number, Array)
+      const cleanPayload = {
         id: recipe.id,
         title: String(formData.title || '').trim(),
         desc: String(formData.description || '').trim(),
         description: String(formData.description || '').trim(),
-        time: `${formData.cook_time || 15} phút`,
+        time: `${Number(formData.cook_time) || 15} phút`,
         cook_time: Number(formData.cook_time) || 15,
-        difficulty: formData.difficulty || 'Dễ',
-        image: finalImage,
-        image_url: finalImage,
+        difficulty: String(formData.difficulty || 'Dễ'),
+        image: finalImg,
+        image_url: finalImg,
         ingredients: ingredientsArray,
         steps: instructionsArray,
         instructions: instructionsArray,
-        requesterPhone: phone,
+        requesterPhone: phoneStr,
       };
 
       const res = await fetch('/api/recipes', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-phone': phone,
+          'x-user-phone': phoneStr,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(cleanPayload),
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Lỗi khi cập nhật món ăn');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Lỗi máy chủ (${res.status})`);
       }
 
       const updated = await res.json();
