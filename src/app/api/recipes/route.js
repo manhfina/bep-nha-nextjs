@@ -78,14 +78,26 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'Thiếu ID món ăn' }, { status: 400 });
     }
 
-    const { error } = await supabase
+    // 1. Thử xóa theo chuỗi ID
+    let { error } = await supabase
       .from('recipes')
       .delete()
       .eq('id', id);
 
+    // 2. Nếu id là số nguyên, thử xóa theo dạng Number
+    if (error && !isNaN(Number(id))) {
+      const retry = await supabase
+        .from('recipes')
+        .delete()
+        .eq('id', Number(id));
+      error = retry.error;
+    }
+
     if (error) {
+      console.error('Lỗi Supabase DELETE:', error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
     return NextResponse.json({ success: true, id });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -98,7 +110,6 @@ export async function PUT(request) {
     const { id, requesterPhone: bodyPhone, ...rawUpdateData } = body;
     const requesterPhone = request.headers.get('x-user-phone') || bodyPhone;
 
-    // 1. Kiểm tra quyền
     const hasPermission = await verifyPermission(requesterPhone);
     if (!hasPermission) {
       return NextResponse.json(
@@ -111,9 +122,7 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Thiếu ID món ăn cần cập nhật' }, { status: 400 });
     }
 
-    // 2. Chuẩn hóa payload an toàn
     const cleanUpdate = {};
-
     if (rawUpdateData.title !== undefined) cleanUpdate.title = String(rawUpdateData.title).trim();
     if (rawUpdateData.desc !== undefined) cleanUpdate.desc = String(rawUpdateData.desc).trim();
     if (rawUpdateData.description !== undefined) cleanUpdate.description = String(rawUpdateData.description).trim();
@@ -123,26 +132,19 @@ export async function PUT(request) {
     if (rawUpdateData.image !== undefined) cleanUpdate.image = String(rawUpdateData.image);
     if (rawUpdateData.image_url !== undefined) cleanUpdate.image_url = String(rawUpdateData.image_url);
 
-    // Mảng JSON cho ingredients và steps
     if (rawUpdateData.ingredients !== undefined) {
-      cleanUpdate.ingredients = Array.isArray(rawUpdateData.ingredients)
-        ? rawUpdateData.ingredients
-        : [];
+      cleanUpdate.ingredients = Array.isArray(rawUpdateData.ingredients) ? rawUpdateData.ingredients : [];
     }
     if (rawUpdateData.steps !== undefined) {
-      cleanUpdate.steps = Array.isArray(rawUpdateData.steps)
-        ? rawUpdateData.steps
-        : [];
+      cleanUpdate.steps = Array.isArray(rawUpdateData.steps) ? rawUpdateData.steps : [];
     }
 
-    // 3. Thực thi cập nhật Supabase
     let result = await supabase
       .from('recipes')
       .update(cleanUpdate)
       .eq('id', id)
       .select();
 
-    // Nếu không khớp chuỗi UUID, thử ép kiểu sang Number
     if ((!result.data || result.data.length === 0) && !isNaN(Number(id))) {
       result = await supabase
         .from('recipes')
@@ -152,13 +154,11 @@ export async function PUT(request) {
     }
 
     if (result.error) {
-      console.error('Lỗi chi tiết Supabase PUT:', result.error);
       return NextResponse.json({ error: result.error.message }, { status: 500 });
     }
 
     return NextResponse.json(result.data?.[0] || { success: true, id });
   } catch (err) {
-    console.error('Lỗi Server PUT:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
