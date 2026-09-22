@@ -29,6 +29,9 @@ export default function Home() {
   // Bảng giá nguyên liệu
   const [priceMap, setPriceMap] = useState({});
 
+  // Kho nguyên liệu tồn kho tủ lạnh (State dùng chung toàn trang)
+  const [fridgeItems, setFridgeItems] = useState([]);
+
   // Auth, Roles & Family Kitchen state
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState('viewer');
@@ -57,6 +60,32 @@ export default function Home() {
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
+
+  // Nạp tồn kho tủ lạnh từ LocalStorage lúc khởi tạo
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedFridge = localStorage.getItem('bepnha_fridge_items');
+        if (savedFridge) {
+          setFridgeItems(JSON.parse(savedFridge));
+        }
+      } catch (e) {
+        console.error('Lỗi nạp tồn kho tủ lạnh:', e);
+      }
+    }
+  }, []);
+
+  // Hàm cập nhật kho tủ lạnh và lưu localStorage
+  const handleUpdateFridge = (newItems) => {
+    setFridgeItems(newItems);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('bepnha_fridge_items', JSON.stringify(newItems));
+      } catch (e) {
+        console.error('Lỗi lưu tồn kho tủ lạnh:', e);
+      }
+    }
+  };
 
   // Chuẩn hóa dữ liệu món ăn
   const formatRecipe = (item) => ({
@@ -271,7 +300,7 @@ export default function Home() {
 
   const hasPermission = canManageRecipe(user, { role: userRole });
 
-  // Xóa công thức: Xóa dứt điểm trên API và cập nhật thẳng LocalStorage
+  // Xóa công thức
   const handleDeleteRecipe = async (id) => {
     if (!window.confirm('Bạn có chắc chắn muốn xóa món ăn này không?')) {
       return;
@@ -292,7 +321,6 @@ export default function Home() {
         throw new Error(resData.error || 'Xóa thất bại');
       }
 
-      // Xóa thành công: Loại bỏ khỏi State và LocalStorage ngay lập tức
       setRecipes((prev) => {
         const next = prev.filter((r) => String(r.id) !== String(id));
         if (typeof window !== 'undefined') {
@@ -491,7 +519,7 @@ export default function Home() {
     const matchTag = selectedTag
       ? (item.ingredients || []).some((ing) => {
           const ingText = typeof ing === 'string' ? ing : ing.name || '';
-          return ingText.toLowerCase().includes(selectedTag);
+          return ingText.toLowerCase().includes(selectedTag.toLowerCase());
         })
       : true;
 
@@ -732,7 +760,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* Bộ lọc mở rộng */}
+      {/* Bộ lọc mở rộng & Tồn kho tủ lạnh hiển thị động */}
       <div
         style={{
           display: 'flex',
@@ -747,20 +775,71 @@ export default function Home() {
           border: '1px solid rgba(0,0,0,0.05)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'bold' }}>Tủ lạnh:</span>
-          {['trứng', 'bò', 'cà chua', 'cần tây'].map((tag) => (
+        {/* Thanh hiển thị Tồn kho tủ lạnh động */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'bold' }}>🧊 Tủ lạnh:</span>
+          {(!fridgeItems || fridgeItems.length === 0) ? (
             <button
-              key={tag}
-              onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-              className={`tag-btn ${selectedTag === tag ? 'active' : ''}`}
+              onClick={() => setIsFridgeOpen(true)}
+              style={{
+                fontSize: '0.78rem',
+                color: '#319795',
+                background: '#e6fffa',
+                border: '1px dashed #319795',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '600'
+              }}
             >
-              {tag === 'trứng' && '🥚 Trứng'}
-              {tag === 'bò' && '🥩 Thịt bò'}
-              {tag === 'cà chua' && '🍅 Cà chua'}
-              {tag === 'cần tây' && '🥬 Cần tây'}
+              + Thêm đồ vào tủ
             </button>
-          ))}
+          ) : (
+            fridgeItems.map((tag) => (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                className={`tag-btn ${selectedTag === tag ? 'active' : ''}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  textTransform: 'capitalize'
+                }}
+              >
+                <span>
+                  {tag.includes('trứng') ? '🥚 ' :
+                   tag.includes('bò') ? '🥩 ' :
+                   tag.includes('thịt') || tag.includes('heo') || tag.includes('lợn') ? '🥓 ' :
+                   tag.includes('gà') ? '🍗 ' :
+                   tag.includes('cá') || tag.includes('cua') || tag.includes('tôm') ? '🦐 ' :
+                   tag.includes('cà chua') ? '🍅 ' :
+                   tag.includes('cà rốt') || tag.includes('khoai') ? '🥕 ' :
+                   tag.includes('cải') || tag.includes('rau') || tag.includes('cần tây') ? '🥬 ' :
+                   tag.includes('nấm') ? '🍄 ' : '🌱 '}
+                  {tag}
+                </span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const updated = fridgeItems.filter((i) => i !== tag);
+                    handleUpdateFridge(updated);
+                    if (selectedTag === tag) setSelectedTag(null);
+                  }}
+                  style={{
+                    marginLeft: '4px',
+                    color: '#999',
+                    fontWeight: 'bold',
+                    fontSize: '0.75rem',
+                    padding: '0 2px'
+                  }}
+                  title="Xóa khỏi tủ lạnh"
+                >
+                  ✕
+                </span>
+              </button>
+            ))
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -960,16 +1039,16 @@ export default function Home() {
         onOpenDetail={openDetail}
       />
 
-      {/* Modal Dọn tủ lạnh */}
-          <FridgeCleanerModal
-            isOpen={isFridgeOpen}
-            onClose={() => setIsFridgeOpen(false)}
-            recipes={recipes}
-            fridgeItems={fridgeItems}
-            onUpdateFridge={setFridgeItems}
-            onOpenDetail={handleOpenDetail}
-            onAddMissingToCart={handleAddMissingToCart}
-          />
+      {/* Modal Dọn tủ lạnh (Đồng bộ tuyệt đối hai chiều) */}
+      <FridgeCleanerModal
+        isOpen={isFridgeOpen}
+        onClose={() => setIsFridgeOpen(false)}
+        recipes={recipes}
+        fridgeItems={fridgeItems}
+        onUpdateFridge={handleUpdateFridge}
+        onOpenDetail={openDetail}
+        onAddMissingToCart={handleAddMissingToCart}
+      />
 
       {/* Modal Lên lịch thực đơn tuần */}
       <MealPlannerModal
