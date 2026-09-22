@@ -3,10 +3,10 @@ import { NextResponse } from 'next/server';
 const rawKey = process.env.GEMINI_API_KEY || '';
 const apiKey = rawKey.trim().replace(/[\r\n\t]/g, '');
 
-// Cập nhật đúng các model được Google AI hỗ trợ
+// Sử dụng chính xác model Google yêu cầu
 const CANDIDATE_MODELS = [
+  'gemini-3.6-flash',
   'gemini-3.1-pro-preview',
-  'gemini-2.5-flash',
 ];
 
 function extractJson(text) {
@@ -32,10 +32,7 @@ async function callGemini(promptText) {
   let lastError = null;
 
   for (const model of CANDIDATE_MODELS) {
-    const protocol = 'https:';
-    const host = 'generativelanguage.googleapis.com';
-    const path = '/v1beta/models/' + model + ':generateContent';
-    const endpoint = protocol + '//' + host + path;
+    const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)' + model + ':generateContent';
 
     const payload = {
       contents: [
@@ -120,7 +117,7 @@ Văn bản:
       }
 
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)';
+      const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent)';
 
       const payload = {
         contents: [
