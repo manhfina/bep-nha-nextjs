@@ -1,28 +1,36 @@
 // src/lib/priceCalculator.js
 
 /**
- * Chuẩn hóa chuỗi nguyên liệu để tìm kiếm (bỏ dấu cách thừa, viết thường)
+ * Chuẩn hóa tên nguyên liệu: bỏ số, dấu đặc biệt và khoảng trắng thừa
  */
 export function normalizeIngredientName(rawName) {
   if (!rawName) return '';
   return rawName
     .toLowerCase()
-    .replace(/[0-9.,/]/g, '') // bỏ số
-    .replace(/(gam|gram|g|kg|kilogram|lạng|ml|lít|muỗng|thìa|bát|chén|quả|trái|củ|nhánh|tép|bó|gói|hộp|miếng)/gi, '') // bỏ từ chỉ đơn vị
+    .replace(/[0-9:.,/\\-]/g, ' ') // bỏ số và ký tự ngăn cách
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 /**
- * Trích xuất số lượng và đơn vị từ chuỗi nguyên liệu
- * Ví dụ: "300g thịt ba chỉ" -> { amount: 300, unit: 'g' }
+ * Trích xuất số lượng và đơn vị từ chuỗi nguyên liệu hoặc object
  */
-export function parseIngredientAmount(text, baseServings = 2, currentServings = 2) {
+export function parseIngredientAmount(ing, baseServings = 2, currentServings = 2) {
   const ratio = currentServings / (baseServings || 2);
   let amount = 1;
   let unit = 'phần';
 
-  // Tìm số kèm đơn vị (ví dụ: 300g, 2 quả, 1.5kg, 500 ml)
-  const regex = /([\d.,]+)\s*(kg|kilogram|gam|gram|g|lạng|quả|trái|củ|bó|miếng|hộp|lít|ml)/i;
+  if (typeof ing === 'object' && ing !== null) {
+    if (ing.amountPerPerson) {
+      amount = ing.amountPerPerson * currentServings;
+      unit = ing.unit || 'phần';
+      return { amount, unit };
+    }
+  }
+
+  const text = typeof ing === 'string' ? ing : `${ing.name || ''} ${ing.unit || ''}`;
+  // Tìm số kèm đơn vị (VD: 3 quả, 300g, 0.5 kg, 2 nhánh)
+  const regex = /([\d.,]+)\s*(kg|kilogram|gam|gram|g|lạng|quả|trái|củ|nhánh|tép|bó|miếng|hộp|lít|ml|thìa|muỗng)/i;
   const match = text.match(regex);
 
   if (match) {
@@ -39,44 +47,50 @@ export function parseIngredientAmount(text, baseServings = 2, currentServings = 
 }
 
 /**
- * Tính chi phí của 1 nguyên liệu dựa trên từ điển giá
+ * Tính chi phí của 1 nguyên liệu
  */
-export function calculateIngredientCost(ing, priceMap, baseServings = 2, currentServings = 2) {
-  let rawText = typeof ing === 'string' ? ing : `${ing.amountPerPerson ? (ing.amountPerPerson * currentServings) : ''} ${ing.unit || ''} ${ing.name || ''}`;
-  let name = typeof ing === 'string' ? ing : ing.name;
-
-  const { amount, unit } = parseIngredientAmount(rawText, baseServings, currentServings);
+export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, currentServings = 2) {
+  let name = typeof ing === 'string' ? ing : (ing?.name || '');
   const cleanName = normalizeIngredientName(name);
+  const { amount, unit } = parseIngredientAmount(ing, baseServings, currentServings);
 
-  // Tìm trong từ điển giá (so sánh tương đối)
+  // Tìm trong từ điển giá (ưu tiên khớp từ khóa dài nhất)
   let matchedPrice = null;
-  for (const [key, priceData] of Object.entries(priceMap)) {
-    if (cleanName.includes(key) || key.includes(cleanName)) {
-      matchedPrice = priceData;
+  const keys = Object.keys(priceMap).sort((a, b) => b.length - a.length);
+
+  for (const key of keys) {
+    if (cleanName.includes(key.toLowerCase())) {
+      matchedPrice = priceMap[key];
       break;
     }
   }
 
+  // Nếu là gia vị phụ thông thường không có giá cụ thể
   if (!matchedPrice) {
-    // Giá mặc định ước lượng cho gia vị / rau thơm lẻ (~3.000đ)
-    return { name, cost: 3000, estimated: true };
+    const isCommonSpice = /(nước mắm|mắm|tiêu|hạt tiêu|muối|đường|hạt nêm|bột ngọt|dầu ăn)/i.test(cleanName);
+    return {
+      name,
+      cost: isCommonSpice ? 1000 : 3000,
+      estimated: true,
+    };
   }
 
   let finalCost = 0;
-  const standardUnit = matchedPrice.unit.toLowerCase();
-  const price = matchedPrice.price_per_unit;
+  const standardUnit = (matchedPrice.unit || 'kg').toLowerCase();
+  const price = Number(matchedPrice.price_per_unit) || 0;
 
-  // Quy đổi khối lượng về chuẩn đơn giá
+  // Quy đổi theo đơn vị
   if (['g', 'gam'].includes(unit) && standardUnit === 'kg') {
     finalCost = (amount / 1000) * price;
   } else if (unit === 'lạng' && standardUnit === 'kg') {
     finalCost = (amount / 10) * price;
   } else if (unit === 'kg' && standardUnit === 'kg') {
     finalCost = amount * price;
-  } else if (['quả', 'trái', 'củ', 'miếng', 'bó'].includes(unit)) {
+  } else if (['quả', 'trái', 'miếng', 'bó', 'nhánh', 'củ'].includes(standardUnit)) {
     finalCost = amount * price;
   } else {
-    finalCost = (amount / 1000) * price; // fallback
+    // Nếu đơn vị là quả mà trong bảng giá tính theo quả
+    finalCost = amount * price;
   }
 
   return {
@@ -87,9 +101,9 @@ export function calculateIngredientCost(ing, priceMap, baseServings = 2, current
 }
 
 /**
- * Tính tổng chi phí cho toàn bộ món ăn
+ * Tính tổng chi phí toàn bộ món ăn
  */
-export function calculateRecipeTotalCost(recipe, priceMap, servings = 2) {
+export function calculateRecipeTotalCost(recipe, priceMap = {}, servings = 2) {
   if (!recipe?.ingredients || !Array.isArray(recipe.ingredients) || !priceMap) {
     return 0;
   }
@@ -98,6 +112,5 @@ export function calculateRecipeTotalCost(recipe, priceMap, servings = 2) {
     calculateIngredientCost(ing, priceMap, recipe.baseServings || 2, servings)
   );
 
-  const total = itemsCost.reduce((sum, item) => sum + item.cost, 0);
-  return Math.round(total);
+  return itemsCost.reduce((sum, item) => sum + item.cost, 0);
 }
