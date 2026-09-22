@@ -31,7 +31,10 @@ async function callGemini(promptText) {
   let lastError = null;
 
   for (const model of CANDIDATE_MODELS) {
-    const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)' + model + ':generateContent';
+    const protocol = 'https:';
+    const host = 'generativelanguage.googleapis.com';
+    const path = '/v1beta/models/' + model + ':generateContent';
+    const endpoint = protocol + '//' + host + path;
 
     const payload = {
       contents: [
@@ -60,7 +63,7 @@ async function callGemini(promptText) {
       const resText = await res.text();
 
       if (!res.ok) {
-        lastError = new Error('Google API (' + res.status + '): ' + resText);
+        lastError = new Error('Google API ' + res.status + ': ' + resText);
         continue;
       }
 
@@ -116,7 +119,7 @@ Văn bản:
       }
 
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)';
+      const endpoint = 'https://' + '[generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)';
 
       const payload = {
         contents: [
