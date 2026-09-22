@@ -1,154 +1,175 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI, Type } from '@google/genai';
 
 const apiKey = process.env.GEMINI_API_KEY;
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Danh sách các model ổn định theo thứ tự ưu tiên (Tự động đổi nếu model chính nghẽn 503)
+// Danh sách các model đang hoạt động chính thức trên endpoint v1beta
 const CANDIDATE_MODELS = [
   'gemini-2.5-flash',
-  'gemini-1.5-flash',
+  'gemini-2.5-pro',
 ];
 
-// Hàm hỗ trợ gọi Gemini kèm Retry và Fallback model tự động
-async function generateWithFallback(paramsGenerator) {
+async function callGeminiREST(prompt, jsonSchema = null, imageInline = null) {
+  if (!apiKey) {
+    throw new Error('Chưa cấu hình GEMINI_API_KEY trong Environment Variables');
+  }
+
   let lastError = null;
 
   for (const model of CANDIDATE_MODELS) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const params = paramsGenerator(model);
-        const response = await ai.models.generateContent(params);
-        if (response && response.text) {
-          return response;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const parts = [];
+    if (imageInline) {
+      parts.push({
+        inline_data: {
+          mime_type: imageInline.mimeType || 'image/jpeg',
+          data: imageInline.data,
+        },
+      });
+    }
+    parts.push({ text: prompt });
+
+    const requestBody = {
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.2,
+      },
+    };
+
+    if (jsonSchema) {
+      requestBody.generationConfig.responseSchema = jsonSchema;
+    }
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify(requestBody),
+        cache: 'no-store',
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const outputText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (outputText) {
+          return JSON.parse(outputText);
         }
-      } catch (err) {
-        lastError = err;
-        console.warn(`Lỗi gọi model ${model} (lần ${attempt + 1}):`, err.message);
-        // Chờ ngắn trước khi thử lại
-        await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
       }
+
+      const status = response.status;
+      const errorText = await response.text();
+      console.warn(`Model ${model} (${status}):`, errorText);
+      lastError = new Error(errorText);
+
+      // Nếu model bị 404 hoặc 503, tự chuyển sang model tiếp theo
+      if (status === 404 || status === 503 || status === 429) {
+        continue;
+      }
+    } catch (err) {
+      console.warn(`Lỗi kết nối tới model ${model}:`, err.message);
+      lastError = err;
     }
   }
 
-  throw lastError || new Error('Không thể kết nối đến máy chủ AI');
+  throw lastError || new Error('Không thể kết nối đến máy chủ Google Gemini');
 }
 
 export async function POST(request) {
-  if (!ai) {
-    return NextResponse.json(
-      { error: 'Chưa cấu hình GEMINI_API_KEY trong file môi trường' },
-      { status: 500 }
-    );
-  }
-
   try {
-    const { action, text, imageBase64 } = await request.json();
+    const body = await request.json();
+    const { action, text, imageBase64 } = body;
 
-    // 1. ACTION: Bóc tách TOÀN BỘ CÔNG THỨC từ văn bản thô
+    // 1. ACTION: Bóc tách công thức nấu ăn
     if (action === 'parse-recipe') {
-      if (!text?.trim()) {
-        return NextResponse.json({ error: 'Thiếu nội dung văn bản' }, { status: 400 });
+      if (!text || !text.trim()) {
+        return NextResponse.json({ error: 'Vui lòng cung cấp nội dung văn bản' }, { status: 400 });
       }
 
       const prompt = `Bạn là chuyên gia ẩm thực Việt Nam. Hãy đọc đoạn văn bản sau và trích xuất thành một công thức nấu ăn chuẩn xác dạng JSON.
 Yêu cầu:
-- Tên món ăn (title).
-- Mô tả ngắn gọn (desc).
-- Thời gian nấu (cook_time: số phút nguyên, ví dụ: 20).
-- Độ khó (difficulty: "Rất dễ", "Dễ", "Trung bình", "Khó").
-- Khẩu phần cơ bản (base_servings: số người, mặc định là 2 nếu không đề cập).
-- Danh sách nguyên liệu (ingredients): tên nguyên liệu (name), định lượng cho 1 người ăn (amountPerPerson), đơn vị tính (unit). Ví dụ: tổng 300g cho 2 người thì amountPerPerson là 150, unit là "g".
-- Các bước thực hiện (steps): danh sách các bước dạng text ngắn gọn, dễ hiểu.
+- Tên món ăn (title): ngắn gọn, chuẩn vị Việt Nam.
+- Mô tả (desc): 1 câu tóm tắt hương vị hấp dẫn.
+- Thời gian nấu (cook_time): số phút nguyên (ví dụ: 15, 20).
+- Độ khó (difficulty): một trong bốn mức "Rất dễ", "Dễ", "Trung bình", "Khó".
+- Khẩu phần (base_servings): số người ăn, mặc định là 2.
+- Danh sách nguyên liệu (ingredients): mỗi nguyên liệu gồm { name: "tên", amountPerPerson: số_lượng_cho_1_người, unit: "đơn_vị_tính" }.
+- Các bước thực hiện (steps): mảng chuỗi các bước làm ngắn gọn.
 
-Đoạn văn bản cần phân tích:
+Văn bản:
 """${text}"""`;
 
-      const response = await generateWithFallback((model) => ({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING, description: 'Tên món ăn' },
-              desc: { type: Type.STRING, description: 'Mô tả tóm tắt món ăn' },
-              cook_time: { type: Type.NUMBER, description: 'Thời gian nấu bằng phút' },
-              difficulty: { type: Type.STRING, description: 'Độ khó' },
-              base_servings: { type: Type.NUMBER, description: 'Số người ăn cơ bản' },
-              ingredients: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING, description: 'Tên nguyên liệu' },
-                    amountPerPerson: { type: Type.NUMBER, description: 'Lượng cho 1 người' },
-                    unit: { type: Type.STRING, description: 'Đơn vị tính (g, quả, muỗng, tép...)' },
-                  },
-                  required: ['name', 'amountPerPerson', 'unit'],
-                },
+      const recipeSchema = {
+        type: 'OBJECT',
+        properties: {
+          title: { type: 'STRING' },
+          desc: { type: 'STRING' },
+          cook_time: { type: 'NUMBER' },
+          difficulty: { type: 'STRING' },
+          base_servings: { type: 'NUMBER' },
+          ingredients: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                name: { type: 'STRING' },
+                amountPerPerson: { type: 'NUMBER' },
+                unit: { type: 'STRING' },
               },
-              steps: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'Danh sách các bước nấu',
-              },
+              required: ['name', 'amountPerPerson', 'unit'],
             },
-            required: ['title', 'ingredients', 'steps'],
+          },
+          steps: {
+            type: 'ARRAY',
+            items: { type: 'STRING' },
           },
         },
-      }));
+        required: ['title', 'ingredients', 'steps'],
+      };
 
-      const parsedData = JSON.parse(response.text);
+      const parsedData = await callGeminiREST(prompt, recipeSchema);
       return NextResponse.json({ success: true, data: parsedData });
     }
 
-    // 2. ACTION: Quét ảnh tủ lạnh hoặc hóa đơn (Vision)
+    // 2. ACTION: Quét ảnh tủ lạnh hoặc hóa đơn
     if (action === 'scan-vision') {
       if (!imageBase64) {
         return NextResponse.json({ error: 'Thiếu dữ liệu ảnh' }, { status: 400 });
       }
 
       const pureBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const prompt = `Phân tích bức ảnh này (ảnh chụp tủ lạnh hoặc hóa đơn thực phẩm).
-Nhận diện tất cả các nguyên liệu nấu ăn. Trả về JSON gồm tên thực phẩm, số lượng ước tính và đơn vị.`;
+      const prompt = `Phân tích bức ảnh này. Nhận diện tất cả các nguyên liệu nấu ăn có trong ảnh. Trả về JSON gồm tên thực phẩm, số lượng ước tính và đơn vị tính.`;
 
-      const response = await generateWithFallback((model) => ({
-        model,
-        contents: [
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: pureBase64,
-            },
+      const visionSchema = {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            name: { type: 'STRING' },
+            quantity: { type: 'NUMBER' },
+            unit: { type: 'STRING' },
           },
-          { text: prompt },
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: 'Tên thực phẩm' },
-                quantity: { type: Type.NUMBER, description: 'Số lượng' },
-                unit: { type: Type.STRING, description: 'Đơn vị' },
-              },
-              required: ['name'],
-            },
-          },
+          required: ['name'],
         },
-      }));
+      };
 
-      const items = JSON.parse(response.text);
+      const items = await callGeminiREST(prompt, visionSchema, {
+        mimeType: 'image/jpeg',
+        data: pureBase64,
+      });
+
       return NextResponse.json({ success: true, items });
     }
 
     return NextResponse.json({ error: 'Action không hợp lệ' }, { status: 400 });
   } catch (err) {
-    console.error('AI Processing Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('Lỗi API /api/ai:', err);
+    return NextResponse.json(
+      { error: err.message || 'Lỗi xử lý AI' },
+      { status: 500 }
+    );
   }
 }
