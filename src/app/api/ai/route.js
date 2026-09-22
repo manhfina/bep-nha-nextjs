@@ -3,10 +3,10 @@ import { NextResponse } from 'next/server';
 const rawKey = process.env.GEMINI_API_KEY || '';
 const apiKey = rawKey.trim().replace(/[\r\n\t]/g, '');
 
-// Sử dụng model chính thức được Google chỉ định
+// Ưu tiên dòng Flash hoàn toàn miễn phí, bỏ model Pro bị giới hạn quota 0
 const CANDIDATE_MODELS = [
   'gemini-3.6-flash',
-  'gemini-3.1-pro-preview',
+  'gemini-2.5-flash',
 ];
 
 function extractJson(text) {
@@ -24,9 +24,7 @@ function extractJson(text) {
   return JSON.parse(cleaned);
 }
 
-// Giải mã URL gốc từ Base64 để chống 100% lỗi tự sinh Markdown link
 function getEndpoint(modelName) {
-  // Base64 của: "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)"
   const base = Buffer.from('aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy8=', 'base64').toString('utf8');
   return base + modelName + ':generateContent';
 }
@@ -69,6 +67,7 @@ async function callGemini(promptText) {
 
       if (!res.ok) {
         lastError = new Error('Google API ' + res.status + ': ' + resText);
+        // Tự động bỏ qua sang model kế tiếp nếu gặp 404 (Not Found) hoặc 429 (Hết Quota)
         continue;
       }
 
