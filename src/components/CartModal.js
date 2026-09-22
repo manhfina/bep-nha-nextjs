@@ -5,24 +5,57 @@ import * as XLSX from 'xlsx';
 // Đơn giá tham khảo mặc định trên 1 đơn vị tính (VNĐ)
 const DEFAULT_UNIT_PRICES = {
   'trứng': 3500,     // 3.500đ / quả
-  'thịt bò': 300,    // 300đ / gram (30.000đ / lạng)
-  'thịt heo': 180,   // 180đ / gram (18.000đ / lạng)
-  'thịt lợn': 180,
-  'thịt gà': 120,    // 120đ / gram
-  'cà chua': 4000,   // 4.000đ / quả hoặc củ
+  'thịt bò': 280,    // 280đ / gram (28.000đ / lạng)
+  'thịt heo': 140,   // 140đ / gram (14.000đ / lạng)
+  'thịt lợn': 140,
+  'thịt xay': 140,   // 140đ / gram
+  'cua đồng': 180,   // 180đ / gram
+  'thịt gà': 90,     // 90đ / gram
+  'cà chua': 3000,   // 3.000đ / quả hoặc củ
+  'rau cải': 22,     // 22đ / gram (~8.000đ/bó)
+  'cải ngọt': 22,
   'cần tây': 50,     // 50đ / gram
   'hành lá': 2000,   // 2.000đ / nhánh, cây
+  'hành tím': 60,    // 60đ / gram
   'tỏi': 1500,       // 1.500đ / tép
   'đậu phụ': 4000,   // 4.000đ / bìa, miếng
-  'cà rốt': 5000,    // 5.000đ / củ
-  'khoai tây': 6000, // 6.000đ / củ
-  'nấm': 80,         // 80đ / gram
-  'mì': 5000,        // 5.000đ / vắt, gói
-  'dầu ăn': 2000,
-  'nước mắm': 2000,
-  'dầu hào': 2000,
-  'tiêu': 1000,
-  'ớt': 1000,
+  'cà rốt': 4000,    // 4.000đ / củ
+  'khoai tây': 5000, // 5.000đ / củ
+  'nấm': 60,         // 60đ / gram
+  'mì': 3500,        // 3.500đ / vắt, gói
+  'mắm tôm': 1000,
+  'dầu ăn': 1000,
+  'nước mắm': 1000,
+  'dầu hào': 1000,
+  'tiêu': 500,
+  'ớt': 500,
+  'gia vị': 500,
+};
+
+// Nhóm từ đồng nghĩa để gom chung 1 nguyên liệu
+const CANONICAL_ALIASES = [
+  { key: 'thịt heo xay', aliases: ['thịt xay', 'thịt heo xay', 'thịt lợn xay', 'thịt băm'] },
+  { key: 'thịt ba chỉ', aliases: ['ba chỉ', 'thịt ba chỉ', 'thịt ba rọi'] },
+  { key: 'thịt bò', aliases: ['thịt bò', 'bắp bò', 'nạm bò', 'thăn bò'] },
+  { key: 'thịt gà', aliases: ['thịt gà', 'ức gà', 'đùi gà', 'cánh gà'] },
+  { key: 'cua đồng xay', aliases: ['cua xay', 'cua đồng xay', 'thịt cua đồng', 'cua đồng'] },
+  { key: 'trứng gà', aliases: ['trứng gà', 'trứng'] },
+  { key: 'hành tím', aliases: ['hành tím', 'hành khô', 'hành tím băm'] },
+  { key: 'tỏi', aliases: ['tỏi', 'tỏi băm', 'tỏi củ'] },
+  { key: 'hành lá', aliases: ['hành lá', 'hành hoa', 'hành ngò'] },
+  { key: 'đậu phụ', aliases: ['đậu phụ', 'đậu hũ', 'tàu hũ'] },
+  { key: 'rau cải ngọt', aliases: ['rau cải ngọt', 'cải ngọt', 'rau cải'] },
+  { key: 'gia vị thông dụng', aliases: ['gia vị', 'nêm nếm', 'muối, đường', 'bột ngọt'] },
+];
+
+const getCanonicalKey = (name = '') => {
+  const clean = name.toLowerCase().trim();
+  for (const group of CANONICAL_ALIASES) {
+    if (group.aliases.some(alias => clean.includes(alias))) {
+      return group.key;
+    }
+  }
+  return clean;
 };
 
 // Hàm phân tích chuỗi nguyên liệu để trích xuất { name, quantity, unit }
@@ -31,7 +64,6 @@ const parseIngredient = (rawText = '') => {
   let quantity = 1;
   let unit = '';
 
-  // Xử lý dạng: "Tên nguyên liệu: 300 gram" hoặc "Tên (3 quả)"
   if (rawText.includes(':')) {
     const parts = rawText.split(':');
     name = parts[0].trim();
@@ -42,7 +74,6 @@ const parseIngredient = (rawText = '') => {
       unit = match[2].trim();
     }
   } else {
-    // Thử bắt các mẫu như "300g thịt bò" hoặc "3 quả trứng"
     const match = rawText.match(/^([\d.,]+)\s*([a-zA-Zà-ỹÀ-Ỹ]+)?\s+(.+)$/);
     if (match) {
       quantity = parseFloat(match[1].replace(',', '.')) || 1;
@@ -51,19 +82,56 @@ const parseIngredient = (rawText = '') => {
     }
   }
 
+  // Chuẩn hóa đơn vị khối lượng về gram (g) để cộng dồn chính xác
+  let normalizedQty = Math.max(0.1, quantity);
+  let normalizedUnit = unit || 'phần';
+  const uLower = normalizedUnit.toLowerCase();
+
+  if (['kg', 'kilogram'].includes(uLower)) {
+    normalizedQty = quantity * 1000;
+    normalizedUnit = 'g';
+  } else if (['lạng'].includes(uLower)) {
+    normalizedQty = quantity * 100;
+    normalizedUnit = 'g';
+  } else if (['gam', 'gram', 'gr'].includes(uLower)) {
+    normalizedUnit = 'g';
+  }
+
+  const cleanKey = getCanonicalKey(name);
+
   return {
     name: name.charAt(0).toUpperCase() + name.slice(1),
-    cleanKey: name.toLowerCase(),
-    quantity: Math.max(0.1, quantity),
-    unit: unit || 'phần',
+    cleanKey,
+    quantity: normalizedQty,
+    unit: normalizedUnit,
   };
+};
+
+// Gợi ý đóng gói mua thực tế ngoài chợ
+const getSuggestedPack = (unit, qty) => {
+  const u = (unit || '').toLowerCase();
+  if (u === 'g') {
+    if (qty >= 1000) {
+      const kg = Math.ceil(qty / 100) / 10;
+      return `Mua ${kg} kg`;
+    }
+    const rounded = Math.ceil(qty / 50) * 50;
+    return `Mua chẵn ${rounded}g (~${Math.round(rounded / 100)} lạng)`;
+  }
+  if (['quả', 'trái', 'miếng', 'vắt', 'bó', 'củ'].includes(u)) {
+    return `Mua chẵn ${Math.ceil(qty)} ${u}`;
+  }
+  if (['ít', 'chút', 'thìa', 'muỗng', 'phần'].includes(u)) {
+    return 'Gia vị sẵn có trong bếp';
+  }
+  return `Mua ~${Math.ceil(qty)} ${unit}`;
 };
 
 const guessUnitPrice = (cleanKey) => {
   for (const [key, price] of Object.entries(DEFAULT_UNIT_PRICES)) {
-    if (cleanKey.includes(key)) return price;
+    if (cleanKey.includes(key) || key.includes(cleanKey)) return price;
   }
-  return 5000; // Giá fallback mặc định
+  return 3000;
 };
 
 export default function CartModal({
@@ -111,22 +179,25 @@ export default function CartModal({
     return guessUnitPrice(key);
   };
 
-  // Gom nhóm và cộng dồn số lượng toán học
+  // Gom nhóm chuẩn xác theo cleanKey và cùng hệ đơn vị
   const mergedList = shoppingList.reduce((acc, item) => {
     const parsed = parseIngredient(item.text);
-    const key = parsed.cleanKey;
+    const key = `${parsed.cleanKey}__${parsed.unit}`;
 
     if (!acc[key]) {
       acc[key] = {
         name: parsed.name,
-        key: key,
+        key: parsed.cleanKey,
+        groupKey: key,
         totalQuantity: parsed.quantity,
         unit: parsed.unit,
+        suggested: getSuggestedPack(parsed.unit, parsed.quantity),
         dishes: [item.dish],
         ids: [item.id],
       };
     } else {
       acc[key].totalQuantity = Math.round((acc[key].totalQuantity + parsed.quantity) * 100) / 100;
+      acc[key].suggested = getSuggestedPack(acc[key].unit, acc[key].totalQuantity);
       if (!acc[key].dishes.includes(item.dish)) {
         acc[key].dishes.push(item.dish);
       }
@@ -137,7 +208,7 @@ export default function CartModal({
 
   const mergedItems = Object.values(mergedList);
 
-  // Tính tổng chi phí = Tổng (Số lượng x Đơn vị giá)
+  // Tính tổng chi phí
   const totalCost = (viewMode === 'merged' ? mergedItems : shoppingList).reduce((sum, item) => {
     if (viewMode === 'merged') {
       const uPrice = getUnitPrice(item.key);
@@ -149,19 +220,19 @@ export default function CartModal({
     }
   }, 0);
 
-  // 1. Sao chép tin nhắn Zalo kèm định lượng và đơn giá chuẩn
+  // 1. Sao chép tin nhắn Zalo kèm gợi ý đóng gói
   const handleCopyForZalo = () => {
     if (shoppingList.length === 0) return;
 
-    let textToSend = '🛒 DANH SÁCH & DỰ TOÁN ĐI CHỢ:\n';
+    let textToSend = '🛒 DANH SÁCH & GỢI Ý MUA THỰC PHẨM ĐI CHỢ:\n';
     textToSend += '────────────────────\n';
 
     if (viewMode === 'merged') {
       mergedItems.forEach((item, index) => {
         const uPrice = getUnitPrice(item.key);
         const itemTotal = Math.round(item.totalQuantity * uPrice);
-        textToSend += `${index + 1}. ${item.name}: ${item.totalQuantity} ${item.unit} (~${itemTotal.toLocaleString('vi-VN')}đ)\n`;
-        textToSend += `   👉 Dùng cho: ${item.dishes.join(', ')}\n`;
+        textToSend += `${index + 1}. ${item.name}: ${item.totalQuantity} ${item.unit} [👉 ${item.suggested}] (~${itemTotal.toLocaleString('vi-VN')}đ)\n`;
+        textToSend += `   🍲 Dùng cho: ${item.dishes.join(', ')}\n`;
       });
     } else {
       shoppingList.forEach((item, index) => {
@@ -174,7 +245,7 @@ export default function CartModal({
 
     textToSend += '────────────────────\n';
     textToSend += `💰 TỔNG TIỀN DỰ TOÁN: ~${totalCost.toLocaleString('vi-VN')} VNĐ\n`;
-    textToSend += 'Mua giúp mình nhé! Cảm ơn nhiều ❤️';
+    textToSend += 'Mua giúp mình theo danh sách này nhé! Cảm ơn nhiều ❤️';
 
     navigator.clipboard
       .writeText(textToSend)
@@ -182,7 +253,7 @@ export default function CartModal({
       .catch((err) => alert('Lỗi sao chép: ' + err.message));
   };
 
-  // 2. Xuất Excel chi tiết có cột Số lượng, Đơn vị, Đơn giá, Thành tiền
+  // 2. Xuất Excel chi tiết kèm cột Gợi ý mua thực tế
   const handleExportExcel = () => {
     if (shoppingList.length === 0) return;
 
@@ -193,8 +264,8 @@ export default function CartModal({
         return {
           'STT': idx + 1,
           'Tên nguyên liệu': item.name,
-          'Số lượng': item.totalQuantity,
-          'Đơn vị': item.unit,
+          'Cần dùng': `${item.totalQuantity} ${item.unit}`,
+          'Gợi ý mua ngoài chợ': item.suggested,
           'Đơn giá (VNĐ)': uPrice,
           'Thành tiền (VNĐ)': Math.round(item.totalQuantity * uPrice),
           'Món ăn áp dụng': item.dishes.join(', '),
@@ -208,8 +279,8 @@ export default function CartModal({
           'STT': idx + 1,
           'Món ăn': item.dish,
           'Nguyên liệu': parsed.name,
-          'Số lượng': parsed.quantity,
-          'Đơn vị': parsed.unit,
+          'Cần dùng': `${parsed.quantity} ${parsed.unit}`,
+          'Gợi ý mua ngoài chợ': getSuggestedPack(parsed.unit, parsed.quantity),
           'Đơn giá (VNĐ)': uPrice,
           'Thành tiền (VNĐ)': Math.round(parsed.quantity * uPrice),
         };
@@ -219,8 +290,8 @@ export default function CartModal({
     excelData.push({
       'STT': 'TỔNG',
       'Tên nguyên liệu': '',
-      'Số lượng': '',
-      'Đơn vị': '',
+      'Cần dùng': '',
+      'Gợi ý mua ngoài chợ': '',
       'Đơn giá (VNĐ)': '',
       'Thành tiền (VNĐ)': totalCost,
       'Món ăn áp dụng': '',
@@ -230,7 +301,7 @@ export default function CartModal({
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Chi phí đi chợ');
 
-    worksheet['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 26 }];
+    worksheet['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 14 }, { wch: 25 }, { wch: 14 }, { wch: 16 }, { wch: 26 }];
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(workbook, `Chi_Phi_Di_Cho_${dateStr}.xlsx`);
   };
@@ -250,6 +321,7 @@ export default function CartModal({
               <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
               <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${item.name}</td>
               <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${item.totalQuantity} ${item.unit}</td>
+              <td style="padding: 8px; border: 1px solid #ddd; color: #27ae60; font-weight: 500;">${item.suggested}</td>
               <td style="padding: 8px; border: 1px solid #ddd; color: #555;">${item.dishes.join(', ')}</td>
               <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">${itemTotal.toLocaleString('vi-VN')} đ</td>
             </tr>
@@ -262,7 +334,7 @@ export default function CartModal({
           <tr>
             <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
             <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${item.dish}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;" colspan="2">${item.text}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;" colspan="3">${item.text}</td>
             <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">${itemTotal.toLocaleString('vi-VN')} đ</td>
           </tr>
         `;
@@ -290,7 +362,8 @@ export default function CartModal({
               <tr>
                 <th style="width: 40px; text-align:center;">STT</th>
                 <th>${viewMode === 'merged' ? 'Nguyên liệu' : 'Món ăn'}</th>
-                <th style="text-align:center;">Định lượng</th>
+                <th style="text-align:center;">Cần dùng</th>
+                <th>Gợi ý đóng gói</th>
                 <th>${viewMode === 'merged' ? 'Món áp dụng' : 'Chi tiết'}</th>
                 <th style="text-align:right; width: 110px;">Thành tiền</th>
               </tr>
@@ -298,7 +371,7 @@ export default function CartModal({
             <tbody>
               ${itemsHtml}
               <tr class="total-row">
-                <td colspan="4" style="padding: 10px 8px; border: 1px solid #ddd; text-align: right;">TỔNG CHI PHÍ:</td>
+                <td colspan="5" style="padding: 10px 8px; border: 1px solid #ddd; text-align: right;">TỔNG CHI PHÍ:</td>
                 <td style="padding: 10px 8px; border: 1px solid #ddd; text-align: right; color: #d35400;">
                   ${totalCost.toLocaleString('vi-VN')} đ
                 </td>
@@ -326,7 +399,7 @@ export default function CartModal({
           <div>
             <h2 style={cartStyles.title}>🛒 Giỏ đi chợ & Dự toán</h2>
             <span style={{ fontSize: '0.8rem', color: '#888' }}>
-              Tự động cộng dồn số lượng & nhân đơn giá
+              Tự động gom nhóm, quy đổi chẵn gói & tính tiền
             </span>
           </div>
           {shoppingList.length > 0 && (
@@ -346,7 +419,7 @@ export default function CartModal({
                 ...(viewMode === 'merged' ? cartStyles.tabActive : {}),
               }}
             >
-              Gộp nguyên liệu ({mergedItems.length})
+              Gom nhóm nguyên liệu ({mergedItems.length})
             </button>
             <button
               onClick={() => setViewMode('byDish')}
@@ -372,7 +445,7 @@ export default function CartModal({
           <div style={cartStyles.list}>
             {viewMode === 'merged'
               ? mergedItems.map((item) => {
-                  const itemKey = `merged-${item.key}`;
+                  const itemKey = `merged-${item.groupKey}`;
                   const isDone = !!checkedItems[itemKey];
                   const uPrice = getUnitPrice(item.key);
                   const itemTotal = Math.round(item.totalQuantity * uPrice);
@@ -394,7 +467,7 @@ export default function CartModal({
                         style={{ cursor: 'pointer', transform: 'scale(1.15)', marginRight: '10px' }}
                       />
                       <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                           <span
                             style={{
                               ...cartStyles.itemText,
@@ -406,6 +479,9 @@ export default function CartModal({
                           </span>
                           <span style={cartStyles.qtyBadge}>
                             {item.totalQuantity} {item.unit}
+                          </span>
+                          <span style={cartStyles.packBadge}>
+                            {item.suggested}
                           </span>
                         </div>
                         <span style={cartStyles.dishName}>Dùng cho: {item.dishes.join(', ')}</span>
@@ -419,7 +495,7 @@ export default function CartModal({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                           <input
                             type="number"
-                            step="500"
+                            step="100"
                             value={uPrice}
                             onChange={(e) => handleUnitPriceChange(item.key, e.target.value)}
                             style={cartStyles.priceInput}
@@ -510,7 +586,7 @@ export default function CartModal({
             </div>
 
             <button onClick={handleCopyForZalo} style={cartStyles.btnZalo}>
-              📲 Gửi Zalo kèm bảng tính
+              📲 Gửi Zalo kèm bảng tính & gợi ý mua
             </button>
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
               <button onClick={handleExportExcel} style={cartStyles.btnExcel}>
@@ -539,7 +615,7 @@ const cartStyles = {
   modal: {
     backgroundColor: '#fff',
     borderRadius: '24px',
-    maxWidth: '540px',
+    maxWidth: '560px',
     width: '100%',
     maxHeight: '88vh',
     display: 'flex',
@@ -593,10 +669,10 @@ const cartStyles = {
     borderRadius: '12px', border: '1px solid #edf2f7', cursor: 'pointer',
   },
   dishName: {
-    fontSize: '0.75rem', color: '#e67e22', fontWeight: '600', display: 'block',
+    fontSize: '0.75rem', color: '#e67e22', fontWeight: '600', display: 'block', marginTop: '3px',
   },
   itemText: {
-    margin: '2px 0 0 0', fontSize: '0.9rem', color: '#2d3436', fontWeight: '500',
+    margin: 0, fontSize: '0.9rem', color: '#2d3436', fontWeight: '500',
   },
   qtyBadge: {
     backgroundColor: '#ebf8ff',
@@ -605,6 +681,15 @@ const cartStyles = {
     fontWeight: '700',
     padding: '2px 8px',
     borderRadius: '6px',
+  },
+  packBadge: {
+    backgroundColor: '#f0fff4',
+    color: '#27ae60',
+    fontSize: '0.72rem',
+    fontWeight: '600',
+    padding: '2px 8px',
+    borderRadius: '6px',
+    border: '1px solid #c6f6d5',
   },
   priceInput: {
     width: '60px',
