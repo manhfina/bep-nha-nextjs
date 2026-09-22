@@ -7,7 +7,7 @@ export function normalizeIngredientName(rawName) {
   if (!rawName) return '';
   return rawName
     .toLowerCase()
-    .replace(/[0-9:.,/\\-]/g, ' ') // bỏ số và ký tự ngăn cách
+    .replace(/[0-9:.,/\\-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -23,14 +23,20 @@ export function parseIngredientAmount(ing, baseServings = 2, currentServings = 2
   if (typeof ing === 'object' && ing !== null) {
     if (ing.amountPerPerson) {
       amount = ing.amountPerPerson * currentServings;
-      unit = ing.unit || 'phần';
+      unit = (ing.unit || 'phần').toLowerCase();
       return { amount, unit };
     }
   }
 
-  const text = typeof ing === 'string' ? ing : `${ing.name || ''} ${ing.unit || ''}`;
-  // Tìm số kèm đơn vị (VD: 3 quả, 300g, 0.5 kg, 2 nhánh)
-  const regex = /([\d.,]+)\s*(kg|kilogram|gam|gram|g|lạng|quả|trái|củ|nhánh|tép|bó|miếng|hộp|lít|ml|thìa|muỗng)/i;
+  // Ghép chuỗi để phân tích regex
+  let text = '';
+  if (typeof ing === 'string') {
+    text = ing;
+  } else if (typeof ing === 'object' && ing !== null) {
+    text = `${ing.name || ''} ${ing.unit || ''} ${ing.amount || ''}`;
+  }
+
+  const regex = /([\d.,]+)\s*(kg|kilogram|gam|gram|g|lạng|quả|trái|củ|nhánh|tép|bó|cọng|miếng|hộp|lít|ml|thìa|muỗng|bát|chén)/i;
   const match = text.match(regex);
 
   if (match) {
@@ -54,7 +60,7 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
   const cleanName = normalizeIngredientName(name);
   const { amount, unit } = parseIngredientAmount(ing, baseServings, currentServings);
 
-  // Tìm trong từ điển giá (ưu tiên khớp từ khóa dài nhất)
+  // Tìm trong từ điển giá (ưu tiên từ khóa dài nhất)
   let matchedPrice = null;
   const keys = Object.keys(priceMap).sort((a, b) => b.length - a.length);
 
@@ -65,9 +71,9 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
     }
   }
 
-  // Nếu là gia vị phụ thông thường không có giá cụ thể
+  // 1. Nếu là gia vị nêm nếm thông thường
+  const isCommonSpice = /(nước mắm|mắm|tiêu|hạt tiêu|muối|đường|hạt nêm|bột ngọt|dầu ăn|dấm|giấm|xì dầu|nước tương)/i.test(cleanName);
   if (!matchedPrice) {
-    const isCommonSpice = /(nước mắm|mắm|tiêu|hạt tiêu|muối|đường|hạt nêm|bột ngọt|dầu ăn)/i.test(cleanName);
     return {
       name,
       cost: isCommonSpice ? 1000 : 3000,
@@ -79,23 +85,47 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
   const standardUnit = (matchedPrice.unit || 'kg').toLowerCase();
   const price = Number(matchedPrice.price_per_unit) || 0;
 
-  // Quy đổi theo đơn vị
+  // 2. Xử lý quy đổi chi tiết theo đơn vị
   if (['g', 'gam'].includes(unit) && standardUnit === 'kg') {
     finalCost = (amount / 1000) * price;
   } else if (unit === 'lạng' && standardUnit === 'kg') {
     finalCost = (amount / 10) * price;
   } else if (unit === 'kg' && standardUnit === 'kg') {
     finalCost = amount * price;
-  } else if (['quả', 'trái', 'miếng', 'bó', 'nhánh', 'củ'].includes(standardUnit)) {
-    finalCost = amount * price;
-  } else {
-    // Nếu đơn vị là quả mà trong bảng giá tính theo quả
-    finalCost = amount * price;
+  } 
+  // Xử lý các đơn vị nhỏ như: nhánh, cọng, tép (VD: hành lá, tỏi, gừng)
+  else if (['nhánh', 'cọng', 'tép'].includes(unit)) {
+    if (standardUnit === 'kg') {
+      // 1 nhánh hành/cọng hành nặng ước tính ~10g (0.01kg)
+      finalCost = amount * 0.01 * price; 
+    } else {
+      finalCost = amount * 500; // Giá ước tính tượng trưng nếu đơn vị khác
+    }
+  } 
+  // Xử lý củ (hành tây, cà rốt, khoai tây) khi đơn vị chuẩn là kg
+  else if (unit === 'củ' && standardUnit === 'kg') {
+    // Ước lượng 1 củ ~ 150g (0.15kg)
+    finalCost = amount * 0.15 * price;
   }
+  // Các đơn vị đếm trực tiếp (quả, trái, miếng, bó, hộp)
+  else if (['quả', 'trái', 'miếng', 'bó', 'hộp'].includes(unit) || ['quả', 'trái', 'miếng', 'bó', 'hộp'].includes(standardUnit)) {
+    finalCost = amount * price;
+  } 
+  // Nếu là thìa/muỗng khi ướp gia vị
+  else if (['thìa', 'muỗng'].includes(unit)) {
+    finalCost = 1000;
+  } 
+  // Mặc định an toàn
+  else {
+    finalCost = (amount / 1000) * price;
+  }
+
+  // Đảm bảo không nhỏ hơn 500đ nếu đã tốn nguyên liệu
+  finalCost = Math.max(500, Math.round(finalCost));
 
   return {
     name,
-    cost: Math.round(finalCost),
+    cost: finalCost,
     estimated: false,
   };
 }
