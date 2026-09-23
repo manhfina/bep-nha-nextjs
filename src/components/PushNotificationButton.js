@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
 
-// Hàm hỗ trợ chuyển đổi Public Key từ base64 sang Uint8Array
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -39,27 +38,24 @@ export default function PushNotificationButton({ currentUser, currentKitchen }) 
     try {
       const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!vapidPublicKey) {
-        throw new Error('Chưa cấu hình NEXT_PUBLIC_VAPID_PUBLIC_KEY trong .env');
+        throw new Error('Chưa cấu hình NEXT_PUBLIC_VAPID_PUBLIC_KEY trên Vercel.');
       }
 
       const registration = await navigator.serviceWorker.ready;
 
-      // Yêu cầu quyền nhận thông báo
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
-        alert('Bạn cần cấp quyền Thông báo để Bếp Nhà có thể nhắc giờ nấu ăn!');
+        alert('Bạn cần cấp quyền Cho phép (Allow) để nhận thông báo nhắc giờ nấu ăn!');
         setLoading(false);
         return;
       }
 
-      // Đăng ký nhận push qua PushManager
       const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey);
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: convertedVapidKey,
       });
 
-      // Gửi token subscription lên server để lưu vào Supabase
       const res = await fetch('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -70,18 +66,22 @@ export default function PushNotificationButton({ currentUser, currentKitchen }) 
         }),
       });
 
-      if (!res.ok) throw new Error('Không thể lưu thông tin đăng ký lên hệ thống');
+      const resJson = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(resJson.error || 'Server không thể lưu thông tin đăng ký');
+      }
 
       setIsSubscribed(true);
-      alert('🔔 Tuyệt vời! Bếp Nhà sẽ nhắc bạn chuẩn bị bữa ăn vào 10:45 trưa và 16:45 chiều mỗi ngày.');
+      alert('🔔 Kích hoạt chuông thành công! Bếp Nhà sẽ nhắc giờ nấu ăn hàng ngày.');
 
-      // Bắn thử ngay 1 thông báo chào mừng
+      // Gửi thông báo thử nghiệm
       await fetch('/api/push/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: '🎉 Kích hoạt chuông nhắc thành công!',
-          body: 'Bếp Nhà đã sẵn sàng đồng hành cùng bữa cơm gia đình bạn mỗi ngày.',
+          title: '🎉 Kích hoạt thành công!',
+          body: 'Bếp Nhà đã sẵn sàng nhắc bạn vào 10:45 trưa và 16:45 chiều mỗi ngày.',
           targetUserId: currentUser?.id,
         }),
       });
