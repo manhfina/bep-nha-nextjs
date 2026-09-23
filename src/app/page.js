@@ -18,6 +18,7 @@ import PwaInstallPrompt from '../components/PwaInstallPrompt';
 import PushNotificationButton from '@/components/PushNotificationButton';
 import AiScannerModal from '../components/AiScannerModal';
 import NutritionStatsModal from '../components/NutritionStatsModal';
+import ZeroWasteProfileModal from '../components/ZeroWasteProfileModal';
 import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
 import { getCachedData, setCachedData, fetchWithDedupe, CacheKeys } from '@/lib/cacheManager';
 
@@ -66,6 +67,7 @@ export default function Home() {
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [isZeroWasteOpen, setIsZeroWasteOpen] = useState(false);
 
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
@@ -662,7 +664,7 @@ export default function Home() {
           {/* Nút Nhận thông báo nhắc giờ nấu ăn */}
           <PushNotificationButton currentUser={user} currentKitchen={kitchenData?.kitchen} />
 
-          {/* Nút Báo cáo Chi tiêu & Dinh dưỡng */}
+          {/* Nút Báo cáo Chi tiêu & Dinh dưỡng (Hướng 4) */}
           <button
             onClick={() => setIsStatsOpen(true)}
             style={{
@@ -684,7 +686,29 @@ export default function Home() {
             📊 Báo cáo
           </button>
 
-          {/* Nút Quét ảnh AI */}
+          {/* Nút Bếp Sạch - Nhà No (Hướng 5) */}
+          <button
+            onClick={() => setIsZeroWasteOpen(true)}
+            style={{
+              padding: '7px 12px',
+              borderRadius: '10px',
+              border: '1px solid #27ae60',
+              background: '#f0fff4',
+              color: '#27ae60',
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              boxShadow: '0 1px 4px rgba(39, 174, 96, 0.15)',
+            }}
+            title="Quản lý hạn dùng thực phẩm & Khẩu vị gia đình"
+          >
+            🌱 Bếp Sạch
+          </button>
+
+          {/* Nút Quét ảnh AI (Hướng 2) */}
           <button
             onClick={() => setIsScannerOpen(true)}
             style={{
@@ -712,16 +736,16 @@ export default function Home() {
             style={{
               padding: '7px 12px',
               borderRadius: '10px',
-              border: '1px solid #27ae60',
-              background: '#f0fff4',
-              color: '#27ae60',
+              border: '1px solid #2980b9',
+              background: '#ebf8ff',
+              color: '#2980b9',
               fontSize: '0.82rem',
               cursor: 'pointer',
               fontWeight: '700',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              boxShadow: '0 1px 4px rgba(39, 174, 96, 0.15)',
+              boxShadow: '0 1px 4px rgba(41, 128, 185, 0.15)',
             }}
             title="Cài đặt ứng dụng về điện thoại hoặc máy tính"
           >
@@ -926,7 +950,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* Bộ lọc mở rộng & Tồn kho tủ lạnh hiển thị động */}
+      {/* Bộ lọc mở rộng & Tồn kho tủ lạnh */}
       <div
         style={{
           display: 'flex',
@@ -1133,7 +1157,7 @@ export default function Home() {
         priceMap={priceMap}
       />
 
-      {/* Modal Chế độ nấu ăn */}
+      {/* Modal Chế độ nấu ăn (Gamification Cooking Streak) */}
       <CookModeModal
         recipe={cookModeRecipe}
         step={cookStep}
@@ -1143,7 +1167,15 @@ export default function Home() {
           if (cookModeRecipe?.steps && cookStep < cookModeRecipe.steps.length - 1) {
             setCookStep(cookStep + 1);
           } else {
-            alert('🎉 Chúc mừng bạn đã hoàn thành món ăn!');
+            // Tăng chuỗi ngày nấu ăn khi hoàn thành món
+            try {
+              const currentStreak = parseInt(localStorage.getItem('bepnha_cooking_streak') || '1', 10);
+              const nextStreak = currentStreak + 1;
+              localStorage.setItem('bepnha_cooking_streak', nextStreak.toString());
+              alert(`🎉 Chúc mừng bạn đã hoàn thành món ăn!\n🔥 Chuỗi nấu ăn của bạn đã tăng lên ${nextStreak} ngày!`);
+            } catch (e) {
+              alert('🎉 Chúc mừng bạn đã hoàn thành món ăn!');
+            }
             setCookModeRecipe(null);
           }
         }}
@@ -1236,7 +1268,7 @@ export default function Home() {
         onAddCartItems={handleAddCartFromScanner}
       />
 
-      {/* Modal Báo Cáo Dinh Dưỡng & Chi Tiêu (Hướng 4) */}
+      {/* Modal Báo Cáo Dinh Dưỡng & Chi Tiêu */}
       <NutritionStatsModal
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
@@ -1244,6 +1276,14 @@ export default function Home() {
         shoppingList={shoppingList}
         fridgeItems={fridgeItems}
         priceMap={priceMap}
+      />
+
+      {/* Modal Bếp Sạch - Nhà No (Hướng 5) */}
+      <ZeroWasteProfileModal
+        isOpen={isZeroWasteOpen}
+        onClose={() => setIsZeroWasteOpen(false)}
+        fridgeItems={fridgeItems}
+        onUpdateFridge={handleUpdateFridge}
       />
 
       {/* Modal Đăng nhập / Đăng ký */}
