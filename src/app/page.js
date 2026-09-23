@@ -17,6 +17,7 @@ import AdminRolesModal from '../components/AdminRolesModal';
 import PwaInstallPrompt from '../components/PwaInstallPrompt';
 import PushNotificationButton from '@/components/PushNotificationButton';
 import AiScannerModal from '../components/AiScannerModal';
+import NutritionStatsModal from '../components/NutritionStatsModal';
 import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
 import { getCachedData, setCachedData, fetchWithDedupe, CacheKeys } from '@/lib/cacheManager';
 
@@ -64,6 +65,7 @@ export default function Home() {
   const [isFridgeOpen, setIsFridgeOpen] = useState(false);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
 
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
@@ -131,7 +133,6 @@ export default function Home() {
     }
   };
 
-  // Thêm nhanh từ AI Scanner vào tủ lạnh
   const handleAddFridgeFromScanner = (newNames = []) => {
     const existing = new Set(fridgeItems.map((f) => f.toLowerCase().trim()));
     const merged = [...fridgeItems];
@@ -146,7 +147,6 @@ export default function Home() {
     handleUpdateFridge(merged);
   };
 
-  // Thêm nhanh từ AI Scanner hóa đơn vào giỏ đi chợ
   const handleAddCartFromScanner = async (newCartItems = []) => {
     try {
       const res = await fetch('/api/shopping-list', {
@@ -277,6 +277,7 @@ export default function Home() {
     }
   }, []);
 
+  // Supabase Auth & Realtime Core
   useEffect(() => {
     fetchRecipes();
     fetchPrices();
@@ -291,7 +292,8 @@ export default function Home() {
       setUser(session?.user ?? null);
     });
 
-    const channel = supabase
+    // Realtime Recipes
+    const recipeChannel = supabase
       .channel('realtime-recipes')
       .on(
         'postgres_changes',
@@ -325,9 +327,33 @@ export default function Home() {
       )
       .subscribe();
 
+    // Realtime Shopping List
+    const cartChannel = supabase
+      .channel('realtime-shopping-list')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'shopping_list' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setShoppingList((prev) => {
+              if (prev.some((i) => i.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setShoppingList((prev) =>
+              prev.map((i) => (i.id === payload.new.id ? payload.new : i))
+            );
+          } else if (payload.eventType === 'DELETE') {
+            setShoppingList((prev) => prev.filter((i) => i.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       subscription.unsubscribe();
-      supabase.removeChannel(channel);
+      supabase.removeChannel(recipeChannel);
+      supabase.removeChannel(cartChannel);
     };
   }, []);
 
@@ -538,6 +564,22 @@ export default function Home() {
     }
   };
 
+  const handleToggleItemDone = async (ids = [], isDone = false) => {
+    setShoppingList((prev) =>
+      prev.map((item) => (ids.includes(item.id) ? { ...item, is_done: isDone } : item))
+    );
+
+    try {
+      await fetch('/api/shopping-list', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, isDone }),
+      });
+    } catch (err) {
+      console.error('Lỗi toggle item done:', err);
+    }
+  };
+
   const handleRecipeAdded = (newRecipe) => {
     const formattedItem = formatRecipe(newRecipe);
     setRecipes((prev) => {
@@ -620,7 +662,29 @@ export default function Home() {
           {/* Nút Nhận thông báo nhắc giờ nấu ăn */}
           <PushNotificationButton currentUser={user} currentKitchen={kitchenData?.kitchen} />
 
-          {/* Nút Quét ảnh AI (Tủ lạnh / Hóa đơn) */}
+          {/* Nút Báo cáo Chi tiêu & Dinh dưỡng */}
+          <button
+            onClick={() => setIsStatsOpen(true)}
+            style={{
+              padding: '7px 12px',
+              borderRadius: '10px',
+              border: '1px solid #16a085',
+              background: '#e8f8f5',
+              color: '#16a085',
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              boxShadow: '0 1px 4px rgba(22, 160, 133, 0.15)',
+            }}
+            title="Xem phân bổ dinh dưỡng và số tiền tiết kiệm trong tuần"
+          >
+            📊 Báo cáo
+          </button>
+
+          {/* Nút Quét ảnh AI */}
           <button
             onClick={() => setIsScannerOpen(true)}
             style={{
@@ -642,7 +706,7 @@ export default function Home() {
             📸 Quét AI
           </button>
 
-          {/* Nút Cài đặt App hiển thị trực tiếp trên Header */}
+          {/* Nút Cài đặt App */}
           <button
             onClick={handleInstallApp}
             style={{
@@ -1114,6 +1178,7 @@ export default function Home() {
             alert('Lỗi khi dọn giỏ: ' + err.message);
           }
         }}
+        onToggleItemDone={handleToggleItemDone}
         priceMap={priceMap}
       />
 
@@ -1163,12 +1228,22 @@ export default function Home() {
         currentKitchenId={kitchenData?.kitchen?.id}
       />
 
-      {/* Modal Quét Ảnh AI (Smart Receipt OCR & Fridge Vision) */}
+      {/* Modal Quét Ảnh AI */}
       <AiScannerModal
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
         onAddFridgeItems={handleAddFridgeFromScanner}
         onAddCartItems={handleAddCartFromScanner}
+      />
+
+      {/* Modal Báo Cáo Dinh Dưỡng & Chi Tiêu (Hướng 4) */}
+      <NutritionStatsModal
+        isOpen={isStatsOpen}
+        onClose={() => setIsStatsOpen(false)}
+        recipes={recipes}
+        shoppingList={shoppingList}
+        fridgeItems={fridgeItems}
+        priceMap={priceMap}
       />
 
       {/* Modal Đăng nhập / Đăng ký */}
