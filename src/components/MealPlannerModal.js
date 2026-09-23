@@ -17,6 +17,12 @@ export default function MealPlannerModal({
   const [activeSlot, setActiveSlot] = useState(null); // { day, meal: 'lunch' | 'dinner' }
   const [searchTerm, setSearchTerm] = useState('');
 
+  // State cho tính năng AI Copilot
+  const [isAiOpen, setIsAiOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState(null);
+
   // Tải dữ liệu thực đơn từ Supabase API
   const fetchMealPlans = async () => {
     setLoading(true);
@@ -48,6 +54,8 @@ export default function MealPlannerModal({
   useEffect(() => {
     if (isOpen) {
       fetchMealPlans();
+      setIsAiOpen(false);
+      setAiSuggestion(null);
     }
   }, [isOpen, currentUserId, currentKitchenId]);
 
@@ -140,6 +148,105 @@ export default function MealPlannerModal({
     }
   };
 
+  // Gọi Gemini AI để lập thực đơn thông minh
+  const handleGenerateAiPlan = async (customPrompt) => {
+    const promptToSend = customPrompt || aiPrompt;
+    if (!promptToSend.trim()) {
+      alert('Vui lòng nhập nhu cầu thực đơn của gia đình bạn!');
+      return;
+    }
+
+    setAiLoading(true);
+    try {
+      let savedFridge = [];
+      try {
+        savedFridge = JSON.parse(localStorage.getItem('bepnha_fridge_items') || '[]');
+      } catch (e) {}
+
+      const res = await fetch('/api/ai/meal-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptToSend,
+          recipes,
+          fridgeItems: savedFridge,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Lỗi khi tạo thực đơn AI');
+
+      setAiSuggestion(data);
+    } catch (err) {
+      alert('Lỗi AI: ' + err.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Áp dụng thực đơn AI gợi ý vào tuần hiện tại bằng Bulk Insert
+  const handleApplyAiPlan = async () => {
+    if (!aiSuggestion?.plan) return;
+    if (!confirm('Hành động này sẽ cập nhật thực đơn tuần theo gợi ý của AI. Bạn có muốn tiếp tục?')) return;
+
+    setLoading(true);
+    try {
+      // 1. Xóa lịch cũ trước
+      const params = new URLSearchParams();
+      if (currentKitchenId) params.set('kitchenId', currentKitchenId);
+      else if (currentUserId) params.set('userId', currentUserId);
+      await fetch(`/api/meal-plans?${params.toString()}`, { method: 'DELETE' });
+
+      // 2. Chuẩn bị mảng bản ghi để chèn hàng loạt (Bulk Insert)
+      const itemsToInsert = [];
+      const newPlanner = {};
+
+      aiSuggestion.plan.forEach((item) => {
+        const { day, lunch = [], dinner = [] } = item;
+
+        lunch.forEach((recipeId) => {
+          if (recipeMap[recipeId]) {
+            itemsToInsert.push({ day, mealType: 'lunch', recipeId });
+            const key = `${day}_lunch`;
+            newPlanner[key] = [...(newPlanner[key] || []), String(recipeId)];
+          }
+        });
+
+        dinner.forEach((recipeId) => {
+          if (recipeMap[recipeId]) {
+            itemsToInsert.push({ day, mealType: 'dinner', recipeId });
+            const key = `${day}_dinner`;
+            newPlanner[key] = [...(newPlanner[key] || []), String(recipeId)];
+          }
+        });
+      });
+
+      // 3. Gửi 1 request Bulk Insert duy nhất
+      if (itemsToInsert.length > 0) {
+        const bulkRes = await fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: itemsToInsert,
+            userId: currentUserId || null,
+            kitchenId: currentKitchenId || null,
+          }),
+        });
+
+        if (!bulkRes.ok) throw new Error('Không thể lưu thực đơn hàng loạt');
+      }
+
+      setPlanner(newPlanner);
+      setIsAiOpen(false);
+      setAiSuggestion(null);
+      alert('🎉 Đã áp dụng thực đơn AI thành công!');
+    } catch (err) {
+      alert('Lỗi áp dụng thực đơn: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const plannedRecipes = Object.values(planner)
     .flat()
     .map((id) => recipeMap[id])
@@ -154,9 +261,22 @@ export default function MealPlannerModal({
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} style={styles.closeBtn}>✕</button>
 
+        {/* Header Modal */}
         <div style={styles.header}>
           <div>
-            <h2 style={styles.title}>📅 Lên Lịch Thực Đơn Tuần</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h2 style={styles.title}>📅 Lên Lịch Thực Đơn Tuần</h2>
+              <button
+                onClick={() => setIsAiOpen(!isAiOpen)}
+                style={{
+                  ...styles.btnAiToggle,
+                  backgroundColor: isAiOpen ? '#8e44ad' : '#f3e8ff',
+                  color: isAiOpen ? '#fff' : '#8e44ad',
+                }}
+              >
+                ✨ AI Chef Copilot
+              </button>
+            </div>
             <span style={{ fontSize: '0.8rem', color: '#636e72' }}>
               {currentKitchenId ? 'Đang đồng bộ trực tiếp với Bếp Gia Đình' : 'Thực đơn cá nhân'}
             </span>
@@ -168,8 +288,91 @@ export default function MealPlannerModal({
           )}
         </div>
 
+        {/* Khối Trợ lý AI Copilot */}
+        {isAiOpen && (
+          <div style={styles.aiBox}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <strong style={{ fontSize: '0.9rem', color: '#6b21a8' }}>
+                🤖 Trợ lý AI lên thực đơn tuần tự động
+              </strong>
+              <span style={{ fontSize: '0.75rem', color: '#9333ea' }}>Gemini 1.5 Flash</span>
+            </div>
+
+            <div style={styles.aiQuickTags}>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiPrompt('Lên thực đơn tuần giàu Protein, ít tinh bột, ưu tiên thịt nạc, trứng và cá');
+                  handleGenerateAiPlan('Lên thực đơn tuần giàu Protein, ít tinh bột, ưu tiên thịt nạc, trứng và cá');
+                }}
+                style={styles.aiTagBtn}
+              >
+                🥩 Nhiều đạm (High-Protein)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiPrompt('Lên thực đơn tuần tiết kiệm ngân sách, món dễ nấu dưới 25 phút');
+                  handleGenerateAiPlan('Lên thực đơn tuần tiết kiệm ngân sách, món dễ nấu dưới 25 phút');
+                }}
+                style={styles.aiTagBtn}
+              >
+                💰 Tiết kiệm & Nhanh gọn
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiPrompt('Tận dụng tối đa các nguyên liệu đang có trong tủ lạnh để không lãng phí');
+                  handleGenerateAiPlan('Tận dụng tối đa các nguyên liệu đang có trong tủ lạnh để không lãng phí');
+                }}
+                style={styles.aiTagBtn}
+              >
+                🧊 Ưu tiên dùng đồ trong tủ lạnh
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+              <input
+                type="text"
+                placeholder="Nhập yêu cầu riêng (VD: 4 người ăn, ngân sách 1 triệu, nhiều rau xanh...)"
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                style={styles.aiInput}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleGenerateAiPlan();
+                }}
+              />
+              <button
+                onClick={() => handleGenerateAiPlan()}
+                disabled={aiLoading}
+                style={styles.btnAiSubmit}
+              >
+                {aiLoading ? 'Đang phân tích...' : 'Lập thực đơn'}
+              </button>
+            </div>
+
+            {/* Kết quả AI gợi ý */}
+            {aiSuggestion && (
+              <div style={styles.aiResultBox}>
+                <div style={{ fontSize: '0.85rem', color: '#4a044e', fontWeight: '600', marginBottom: '8px' }}>
+                  💡 {aiSuggestion.summary}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button onClick={() => setAiSuggestion(null)} style={styles.btnCancelAi}>
+                    Đóng gợi ý
+                  </button>
+                  <button onClick={handleApplyAiPlan} style={styles.btnApplyAi}>
+                    ⚡ Áp dụng vào lịch tuần ngay
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Lưới Lịch 7 Ngày */}
         {loading ? (
-          <p style={{ textAlign: 'center', color: '#888', padding: '30px' }}>Đang tải lịch từ Supabase...</p>
+          <p style={{ textAlign: 'center', color: '#888', padding: '30px' }}>Đang nạp dữ liệu thực đơn...</p>
         ) : (
           <div style={styles.grid}>
             {DAYS.map((day) => (
@@ -317,7 +520,7 @@ const styles = {
   modal: {
     backgroundColor: '#fff',
     borderRadius: '24px',
-    maxWidth: '900px',
+    maxWidth: '920px',
     width: '100%',
     maxHeight: '90vh',
     display: 'flex',
@@ -341,6 +544,82 @@ const styles = {
   },
   title: {
     margin: 0, fontSize: '1.35rem', fontWeight: '700', color: '#2d3436',
+  },
+  btnAiToggle: {
+    border: 'none',
+    padding: '4px 10px',
+    borderRadius: '10px',
+    fontSize: '0.78rem',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  aiBox: {
+    backgroundColor: '#faf5ff',
+    border: '1px solid #e9d5ff',
+    borderRadius: '16px',
+    padding: '14px',
+    marginBottom: '16px',
+  },
+  aiQuickTags: {
+    display: 'flex',
+    gap: '6px',
+    flexWrap: 'wrap',
+  },
+  aiTagBtn: {
+    backgroundColor: '#fff',
+    border: '1px solid #d8b4fe',
+    borderRadius: '8px',
+    padding: '4px 8px',
+    fontSize: '0.75rem',
+    fontWeight: '600',
+    color: '#7e22ce',
+    cursor: 'pointer',
+  },
+  aiInput: {
+    flex: 1,
+    padding: '8px 12px',
+    borderRadius: '10px',
+    border: '1px solid #d8b4fe',
+    fontSize: '0.85rem',
+    outline: 'none',
+    background: '#fff',
+  },
+  btnAiSubmit: {
+    backgroundColor: '#8e44ad',
+    color: '#fff',
+    border: 'none',
+    padding: '8px 14px',
+    borderRadius: '10px',
+    fontWeight: '700',
+    fontSize: '0.82rem',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  aiResultBox: {
+    marginTop: '12px',
+    backgroundColor: '#f3e8ff',
+    padding: '10px 14px',
+    borderRadius: '12px',
+    border: '1px solid #d8b4fe',
+  },
+  btnCancelAi: {
+    background: 'none',
+    border: 'none',
+    color: '#6b7280',
+    fontSize: '0.78rem',
+    cursor: 'pointer',
+    fontWeight: '600',
+  },
+  btnApplyAi: {
+    backgroundColor: '#27ae60',
+    color: '#fff',
+    border: 'none',
+    padding: '6px 12px',
+    borderRadius: '8px',
+    fontSize: '0.8rem',
+    fontWeight: '700',
+    cursor: 'pointer',
   },
   btnClear: {
     background: 'none', border: 'none', color: '#e74c3c',

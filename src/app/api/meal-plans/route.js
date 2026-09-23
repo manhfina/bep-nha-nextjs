@@ -26,10 +26,36 @@ export async function GET(request) {
   return NextResponse.json(data);
 }
 
-// POST: Thêm một món vào bữa ăn của ngày trong tuần
+// POST: Thêm một món HOẶC thêm hàng loạt món vào bữa ăn
 export async function POST(request) {
   try {
-    const { day, mealType, recipeId, userId, kitchenId } = await request.json();
+    const body = await request.json();
+
+    // Trường hợp 1: Chèn hàng loạt (Bulk insert từ AI Meal Planner)
+    if (Array.isArray(body.items)) {
+      if (body.items.length === 0) {
+        return NextResponse.json([]);
+      }
+
+      const rowsToInsert = body.items.map((item) => ({
+        day: item.day,
+        meal_type: item.mealType || item.meal_type,
+        recipe_id: item.recipeId || item.recipe_id,
+        user_id: item.userId || body.userId || null,
+        kitchen_id: item.kitchenId || body.kitchenId || null,
+      }));
+
+      const { data, error } = await supabase
+        .from('meal_plans')
+        .insert(rowsToInsert)
+        .select();
+
+      if (error) throw error;
+      return NextResponse.json(data);
+    }
+
+    // Trường hợp 2: Chèn 1 món lẻ (Chọn tay thủ công như cũ)
+    const { day, mealType, recipeId, userId, kitchenId } = body;
 
     if (!day || !mealType || !recipeId) {
       return NextResponse.json({ error: 'Thiếu dữ liệu' }, { status: 400 });
