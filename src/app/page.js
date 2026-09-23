@@ -14,6 +14,7 @@ import MealPlannerModal from '../components/MealPlannerModal';
 import AuthModal from '../components/AuthModal';
 import FamilyKitchenModal from '../components/FamilyKitchenModal';
 import AdminRolesModal from '../components/AdminRolesModal';
+import PwaInstallPrompt from '../components/PwaInstallPrompt';
 import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
 import { getCachedData, setCachedData, fetchWithDedupe, CacheKeys } from '@/lib/cacheManager';
 
@@ -1068,6 +1069,9 @@ export default function Home() {
         onClose={() => setIsAdminModalOpen(false)}
         currentUser={user}
       />
+
+      {/* Banner Cài đặt Ứng dụng PWA Native */}
+      <PwaInstallPrompt />
     </div>
   );
 }
