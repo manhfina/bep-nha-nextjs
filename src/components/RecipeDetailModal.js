@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import ShareRecipeModal from './ShareRecipeModal';
 import { calculateIngredientCost, calculateRecipeTotalCost } from '@/lib/priceCalculator';
+import { calculateRecipeNutrition } from '@/lib/nutritionCalculator';
 
 export default function RecipeDetailModal({
   recipe,
@@ -55,6 +56,9 @@ export default function RecipeDetailModal({
 
   // Tính tổng chi phí theo khẩu phần hiện tại
   const totalCost = calculateRecipeTotalCost(recipe, priceMap, servings);
+
+  // Tính giá trị dinh dưỡng & Macro tự động theo khẩu phần
+  const nutrition = calculateRecipeNutrition(recipe.ingredients || [], servings, recipe.baseServings || 2);
 
   const handleAddNote = async (e) => {
     e.preventDefault();
@@ -170,6 +174,7 @@ export default function RecipeDetailModal({
                     <button
                       onClick={() => onChangeServings(Math.max(1, servings - 1))}
                       style={styles.servingsBtn}
+                      disabled={servings <= 1}
                     >
                       -
                     </button>
@@ -180,6 +185,37 @@ export default function RecipeDetailModal({
                     >
                       +
                     </button>
+                  </div>
+                </div>
+
+                {/* BẢNG DINH DƯỠNG & MACRO (Tự co giãn theo khẩu phần) */}
+                <div style={styles.macroCard}>
+                  <div style={styles.macroHeader}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#2d3436' }}>
+                      📊 Dinh dưỡng ước tính ({servings} người):
+                    </span>
+                    <span style={styles.calPerPerson}>
+                      ~{nutrition.caloriesPerServing} kcal/người
+                    </span>
+                  </div>
+
+                  <div style={styles.macroGrid}>
+                    <div style={{ ...styles.macroItem, backgroundColor: '#fff5f5' }}>
+                      <span style={styles.macroLabel}>🔥 Tổng Năng lượng</span>
+                      <strong style={{ ...styles.macroVal, color: '#e74c3c' }}>{nutrition.calories} kcal</strong>
+                    </div>
+                    <div style={{ ...styles.macroItem, backgroundColor: '#f0fff4' }}>
+                      <span style={styles.macroLabel}>🥩 Đạm (Protein)</span>
+                      <strong style={{ ...styles.macroVal, color: '#27ae60' }}>{nutrition.protein}g</strong>
+                    </div>
+                    <div style={{ ...styles.macroItem, backgroundColor: '#fffaf0' }}>
+                      <span style={styles.macroLabel}>🌾 Tinh bột (Carbs)</span>
+                      <strong style={{ ...styles.macroVal, color: '#d35400' }}>{nutrition.carbs}g</strong>
+                    </div>
+                    <div style={{ ...styles.macroItem, backgroundColor: '#ebf8ff' }}>
+                      <span style={styles.macroLabel}>🥑 Chất béo (Fat)</span>
+                      <strong style={{ ...styles.macroVal, color: '#3182ce' }}>{nutrition.fat}g</strong>
+                    </div>
                   </div>
                 </div>
 
@@ -489,7 +525,7 @@ const styles = {
     backgroundColor: '#fffaf0',
     border: '1px solid #feebc8',
     borderRadius: '12px',
-    marginBottom: '10px',
+    marginBottom: '12px',
   },
   servingsControls: {
     display: 'flex',
@@ -510,6 +546,49 @@ const styles = {
     fontSize: '0.9rem',
     minWidth: '65px',
     textAlign: 'center',
+  },
+  macroCard: {
+    backgroundColor: '#f8f9fa',
+    border: '1px solid #edf2f7',
+    borderRadius: '14px',
+    padding: '12px 14px',
+    marginBottom: '12px',
+  },
+  macroHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px',
+  },
+  calPerPerson: {
+    fontSize: '0.75rem',
+    color: '#e67e22',
+    fontWeight: '700',
+    backgroundColor: '#fffaf0',
+    padding: '2px 8px',
+    borderRadius: '6px',
+    border: '1px solid #feebc8',
+  },
+  macroGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '6px',
+  },
+  macroItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: '6px 4px',
+    borderRadius: '8px',
+  },
+  macroLabel: {
+    fontSize: '0.65rem',
+    color: '#718096',
+    marginBottom: '2px',
+  },
+  macroVal: {
+    fontSize: '0.82rem',
+    fontWeight: '800',
   },
   costBox: {
     display: 'flex',
