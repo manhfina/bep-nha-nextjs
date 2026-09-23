@@ -51,14 +51,14 @@ const CANONICAL_ALIASES = [
 const getCanonicalKey = (name = '') => {
   const clean = name.toLowerCase().trim();
   for (const group of CANONICAL_ALIASES) {
-    if (group.aliases.some(alias => clean.includes(alias))) {
+    if (group.aliases.some((alias) => clean.includes(alias))) {
       return group.key;
     }
   }
   return clean;
 };
 
-// Hàm phân tích chuỗi nguyên liệu để trích xuất { name, quantity, unit }
+// Phân tích chuỗi nguyên liệu trích xuất { name, quantity, unit }
 const parseIngredient = (rawText = '') => {
   let name = rawText.trim();
   let quantity = 1;
@@ -82,7 +82,7 @@ const parseIngredient = (rawText = '') => {
     }
   }
 
-  // Chuẩn hóa đơn vị khối lượng về gram (g) để cộng dồn chính xác
+  // Chuẩn hóa đơn vị khối lượng về gram (g)
   let normalizedQty = Math.max(0.1, quantity);
   let normalizedUnit = unit || 'phần';
   const uLower = normalizedUnit.toLowerCase();
@@ -112,7 +112,6 @@ const getSuggestedPack = (unit, qty, name = '') => {
   const u = (unit || '').toLowerCase().trim();
   const n = (name || '').toLowerCase().trim();
 
-  // 1. Nhóm đóng chai đặc thù: mắm tôm, dầu ăn, nước mắm, dầu hào, giấm
   if (/(mắm tôm|nước mắm|dầu hào|dầu ăn|dầu mè|giấm|xì dầu|nước tương)/i.test(n)) {
     if (u.includes('muỗng') || u.includes('thìa') || u.includes('canh') || u.includes('ít') || u.includes('cà phê')) {
       return 'Gia vị có sẵn (hoặc mua 1 hũ/chai)';
@@ -120,7 +119,6 @@ const getSuggestedPack = (unit, qty, name = '') => {
     return 'Mua 1 chai/hũ';
   }
 
-  // 2. Gia vị thìa / muỗng / nêm nếm nói chung
   if (
     u.includes('thìa') ||
     u.includes('muỗng') ||
@@ -132,7 +130,6 @@ const getSuggestedPack = (unit, qty, name = '') => {
     return 'Gia vị sẵn có trong bếp';
   }
 
-  // 3. Khối lượng gram
   if (u === 'g') {
     if (qty >= 1000) {
       const kg = Math.ceil(qty / 100) / 10;
@@ -142,7 +139,6 @@ const getSuggestedPack = (unit, qty, name = '') => {
     return `Mua chẵn ${rounded}g (~${Math.round(rounded / 100)} lạng)`;
   }
 
-  // 4. Các đơn vị đếm thông dụng
   if (['quả', 'trái', 'miếng', 'vắt', 'bó', 'củ'].includes(u)) {
     return `Mua chẵn ${Math.ceil(qty)} ${u}`;
   }
@@ -163,19 +159,25 @@ export default function CartModal({
   onClose,
   onRemoveItem,
   onClearCart,
+  priceMap = {},
 }) {
-  const [viewMode, setViewMode] = useState('merged'); // 'merged' hoặc 'byDish'
+  const [viewMode, setViewMode] = useState('merged'); // 'merged' | 'byDish'
   const [checkedItems, setCheckedItems] = useState({});
   const [customUnitPrices, setCustomUnitPrices] = useState({});
+  const [deductFridge, setDeductFridge] = useState(true);
+  const [fridgeItems, setFridgeItems] = useState([]);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('bepnha_unit_prices');
-      if (saved) setCustomUnitPrices(JSON.parse(saved));
+      const savedPrices = localStorage.getItem('bepnha_unit_prices');
+      if (savedPrices) setCustomUnitPrices(JSON.parse(savedPrices));
+
+      const savedFridge = localStorage.getItem('bepnha_fridge_items');
+      if (savedFridge) setFridgeItems(JSON.parse(savedFridge));
     } catch (e) {
-      console.error(e);
+      console.error('Lỗi đọc localStorage:', e);
     }
-  }, []);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -199,13 +201,24 @@ export default function CartModal({
 
   const getUnitPrice = (key) => {
     if (customUnitPrices[key] !== undefined) return customUnitPrices[key];
+    if (priceMap && priceMap[key] !== undefined) return priceMap[key];
     return guessUnitPrice(key);
   };
 
-  // Gom nhóm chuẩn xác theo cleanKey và cùng hệ đơn vị
+  // Kiểm tra xem nguyên liệu có sẵn trong tủ lạnh hay không
+  const isItemInFridge = (cleanKey, rawName) => {
+    const target = `${cleanKey} ${rawName}`.toLowerCase();
+    return fridgeItems.some((f) => {
+      const cleanFridge = f.toLowerCase().trim();
+      return target.includes(cleanFridge) || cleanFridge.includes(cleanKey);
+    });
+  };
+
+  // Gom nhóm danh sách đi chợ
   const mergedList = shoppingList.reduce((acc, item) => {
     const parsed = parseIngredient(item.text);
     const key = `${parsed.cleanKey}__${parsed.unit}`;
+    const inFridge = isItemInFridge(parsed.cleanKey, parsed.name);
 
     if (!acc[key]) {
       acc[key] = {
@@ -217,6 +230,7 @@ export default function CartModal({
         suggested: getSuggestedPack(parsed.unit, parsed.quantity, parsed.name),
         dishes: [item.dish],
         ids: [item.id],
+        inFridge,
       };
     } else {
       acc[key].totalQuantity = Math.round((acc[key].totalQuantity + parsed.quantity) * 100) / 100;
@@ -231,38 +245,52 @@ export default function CartModal({
 
   const mergedItems = Object.values(mergedList);
 
-  // Tính tổng chi phí
+  // Tính tổng chi phí (loại bỏ món đã có trong tủ nếu người dùng bật đối chiếu tủ lạnh)
   const totalCost = (viewMode === 'merged' ? mergedItems : shoppingList).reduce((sum, item) => {
     if (viewMode === 'merged') {
+      if (deductFridge && item.inFridge) return sum;
       const uPrice = getUnitPrice(item.key);
       return sum + Math.round(item.totalQuantity * uPrice);
     } else {
       const parsed = parseIngredient(item.text);
+      if (deductFridge && isItemInFridge(parsed.cleanKey, parsed.name)) return sum;
       const uPrice = getUnitPrice(parsed.cleanKey);
       return sum + Math.round(parsed.quantity * uPrice);
     }
   }, 0);
 
-  // 1. Sao chép tin nhắn Zalo kèm gợi ý đóng gói
+  // 1. Sao chép tin nhắn Zalo kèm trạng thái tủ lạnh
   const handleCopyForZalo = () => {
     if (shoppingList.length === 0) return;
 
-    let textToSend = '🛒 DANH SÁCH & GỢI Ý MUA THỰC PHẨM ĐI CHỢ:\n';
+    let textToSend = '🛒 DANH SÁCH & DỰ TOÁN ĐI CHỢ - BẾP NHÀ:\n';
     textToSend += '────────────────────\n';
 
     if (viewMode === 'merged') {
-      mergedItems.forEach((item, index) => {
+      const neededItems = mergedItems.filter((i) => !(deductFridge && i.inFridge));
+      const fridgeAvailable = mergedItems.filter((i) => deductFridge && i.inFridge);
+
+      textToSend += '👉 NGUYÊN LIỆU CẦN MUA NGOÀI CHỢ:\n';
+      neededItems.forEach((item, index) => {
         const uPrice = getUnitPrice(item.key);
         const itemTotal = Math.round(item.totalQuantity * uPrice);
         textToSend += `${index + 1}. ${item.name}: ${item.totalQuantity} ${item.unit} [👉 ${item.suggested}] (~${itemTotal.toLocaleString('vi-VN')}đ)\n`;
         textToSend += `   🍲 Dùng cho: ${item.dishes.join(', ')}\n`;
       });
+
+      if (fridgeAvailable.length > 0) {
+        textToSend += '\n🧊 ĐÃ CÓ TRONG TỦ LẠNH (KHÔNG CẦN MUA):\n';
+        fridgeAvailable.forEach((item, index) => {
+          textToSend += `✓ ${item.name}: ${item.totalQuantity} ${item.unit} (${item.dishes.join(', ')})\n`;
+        });
+      }
     } else {
       shoppingList.forEach((item, index) => {
         const parsed = parseIngredient(item.text);
+        const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
         const uPrice = getUnitPrice(parsed.cleanKey);
         const itemTotal = Math.round(parsed.quantity * uPrice);
-        textToSend += `${index + 1}. ${item.text} (~${itemTotal.toLocaleString('vi-VN')}đ) [${item.dish}]\n`;
+        textToSend += `${index + 1}. ${item.text} ${inF ? '[Đã có sẵn]' : `(~${itemTotal.toLocaleString('vi-VN')}đ)`} [${item.dish}]\n`;
       });
     }
 
@@ -276,36 +304,38 @@ export default function CartModal({
       .catch((err) => alert('Lỗi sao chép: ' + err.message));
   };
 
-  // 2. Xuất Excel chi tiết kèm cột Gợi ý mua thực tế
+  // 2. Xuất Excel chi tiết
   const handleExportExcel = () => {
     if (shoppingList.length === 0) return;
 
     let excelData = [];
     if (viewMode === 'merged') {
       excelData = mergedItems.map((item, idx) => {
+        const inF = deductFridge && item.inFridge;
         const uPrice = getUnitPrice(item.key);
         return {
           'STT': idx + 1,
           'Tên nguyên liệu': item.name,
           'Cần dùng': `${item.totalQuantity} ${item.unit}`,
-          'Gợi ý mua ngoài chợ': item.suggested,
-          'Đơn giá (VNĐ)': uPrice,
-          'Thành tiền (VNĐ)': Math.round(item.totalQuantity * uPrice),
+          'Gợi ý mua ngoài chợ': inF ? 'Đã có trong tủ lạnh' : item.suggested,
+          'Đơn giá (VNĐ)': inF ? 0 : uPrice,
+          'Thành tiền (VNĐ)': inF ? 0 : Math.round(item.totalQuantity * uPrice),
           'Món ăn áp dụng': item.dishes.join(', '),
         };
       });
     } else {
       excelData = shoppingList.map((item, idx) => {
         const parsed = parseIngredient(item.text);
+        const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
         const uPrice = getUnitPrice(parsed.cleanKey);
         return {
           'STT': idx + 1,
           'Món ăn': item.dish,
           'Nguyên liệu': parsed.name,
           'Cần dùng': `${parsed.quantity} ${parsed.unit}`,
-          'Gợi ý mua ngoài chợ': getSuggestedPack(parsed.unit, parsed.quantity, parsed.name),
-          'Đơn giá (VNĐ)': uPrice,
-          'Thành tiền (VNĐ)': Math.round(parsed.quantity * uPrice),
+          'Gợi ý mua ngoài chợ': inF ? 'Đã có trong tủ lạnh' : getSuggestedPack(parsed.unit, parsed.quantity, parsed.name),
+          'Đơn giá (VNĐ)': inF ? 0 : uPrice,
+          'Thành tiền (VNĐ)': inF ? 0 : Math.round(parsed.quantity * uPrice),
         };
       });
     }
@@ -329,7 +359,7 @@ export default function CartModal({
     XLSX.writeFile(workbook, `Chi_Phi_Di_Cho_${dateStr}.xlsx`);
   };
 
-  // 3. In hóa đơn/danh sách chuẩn khổ giấy
+  // 3. In danh sách / Lưu PDF
   const handlePrint = () => {
     if (shoppingList.length === 0) return;
 
@@ -337,28 +367,38 @@ export default function CartModal({
     const itemsHtml = (viewMode === 'merged' ? mergedItems : shoppingList)
       .map((item, idx) => {
         if (viewMode === 'merged') {
+          const inF = deductFridge && item.inFridge;
           const uPrice = getUnitPrice(item.key);
-          const itemTotal = Math.round(item.totalQuantity * uPrice);
+          const itemTotal = inF ? 0 : Math.round(item.totalQuantity * uPrice);
           return `
             <tr>
               <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
               <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${item.name}</td>
               <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${item.totalQuantity} ${item.unit}</td>
-              <td style="padding: 8px; border: 1px solid #ddd; color: #27ae60; font-weight: 500;">${item.suggested}</td>
+              <td style="padding: 8px; border: 1px solid #ddd; color: ${inF ? '#3182ce' : '#27ae60'}; font-weight: 500;">
+                ${inF ? '🧊 Có sẵn trong tủ lạnh' : item.suggested}
+              </td>
               <td style="padding: 8px; border: 1px solid #ddd; color: #555;">${item.dishes.join(', ')}</td>
-              <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">${itemTotal.toLocaleString('vi-VN')} đ</td>
+              <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">
+                ${inF ? '<span style="color:#888;">0 đ</span>' : `${itemTotal.toLocaleString('vi-VN')} đ`}
+              </td>
             </tr>
           `;
         }
         const parsed = parseIngredient(item.text);
+        const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
         const uPrice = getUnitPrice(parsed.cleanKey);
-        const itemTotal = Math.round(parsed.quantity * uPrice);
+        const itemTotal = inF ? 0 : Math.round(parsed.quantity * uPrice);
         return `
           <tr>
             <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
             <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${item.dish}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;" colspan="3">${item.text}</td>
-            <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">${itemTotal.toLocaleString('vi-VN')} đ</td>
+            <td style="padding: 8px; border: 1px solid #ddd;" colspan="3">
+              ${item.text} ${inF ? '<b style="color:#3182ce;">(Có sẵn trong tủ)</b>' : ''}
+            </td>
+            <td style="text-align:right; padding: 8px; border: 1px solid #ddd;">
+              ${inF ? '<span style="color:#888;">0 đ</span>' : `${itemTotal.toLocaleString('vi-VN')} đ`}
+            </td>
           </tr>
         `;
       })
@@ -394,7 +434,7 @@ export default function CartModal({
             <tbody>
               ${itemsHtml}
               <tr class="total-row">
-                <td colspan="5" style="padding: 10px 8px; border: 1px solid #ddd; text-align: right;">TỔNG CHI PHÍ:</td>
+                <td colspan="5" style="padding: 10px 8px; border: 1px solid #ddd; text-align: right;">TỔNG CHI PHÍ THỰC TẾ CẦN CHI:</td>
                 <td style="padding: 10px 8px; border: 1px solid #ddd; text-align: right; color: #d35400;">
                   ${totalCost.toLocaleString('vi-VN')} đ
                 </td>
@@ -422,7 +462,7 @@ export default function CartModal({
           <div>
             <h2 style={cartStyles.title}>🛒 Giỏ đi chợ & Dự toán</h2>
             <span style={{ fontSize: '0.8rem', color: '#888' }}>
-              Tự động gom nhóm, quy đổi chẵn gói & tính tiền
+              Tự động gom nhóm, đối chiếu tủ lạnh & dự toán chi phí
             </span>
           </div>
           {shoppingList.length > 0 && (
@@ -432,27 +472,61 @@ export default function CartModal({
           )}
         </div>
 
-        {/* Chuyển Tabs */}
+        {/* Chuyển Tabs & Công tắc đối chiếu tủ lạnh */}
         {shoppingList.length > 0 && (
-          <div style={cartStyles.tabContainer}>
-            <button
-              onClick={() => setViewMode('merged')}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+            <div style={cartStyles.tabContainer}>
+              <button
+                onClick={() => setViewMode('merged')}
+                style={{
+                  ...cartStyles.tabBtn,
+                  ...(viewMode === 'merged' ? cartStyles.tabActive : {}),
+                }}
+              >
+                Gom nhóm ({mergedItems.length})
+              </button>
+              <button
+                onClick={() => setViewMode('byDish')}
+                style={{
+                  ...cartStyles.tabBtn,
+                  ...(viewMode === 'byDish' ? cartStyles.tabActive : {}),
+                }}
+              >
+                Theo từng món ({shoppingList.length})
+              </button>
+            </div>
+
+            {/* Switch trừ tồn kho tủ lạnh */}
+            <div
+              onClick={() => setDeductFridge(!deductFridge)}
               style={{
-                ...cartStyles.tabBtn,
-                ...(viewMode === 'merged' ? cartStyles.tabActive : {}),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 12px',
+                borderRadius: '10px',
+                backgroundColor: deductFridge ? '#e6fffa' : '#f7fafc',
+                border: deductFridge ? '1px solid #81e6d9' : '1px solid #e2e8f0',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
               }}
             >
-              Gom nhóm nguyên liệu ({mergedItems.length})
-            </button>
-            <button
-              onClick={() => setViewMode('byDish')}
-              style={{
-                ...cartStyles.tabBtn,
-                ...(viewMode === 'byDish' ? cartStyles.tabActive : {}),
-              }}
-            >
-              Theo từng món ({shoppingList.length})
-            </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.9rem' }}>🧊</span>
+                <span style={{ fontSize: '0.8rem', fontWeight: '600', color: deductFridge ? '#234e52' : '#718096' }}>
+                  Khấu trừ đồ có sẵn trong tủ lạnh ({fridgeItems.length} món sẵn có)
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: '700',
+                  color: deductFridge ? '#319795' : '#a0aec0',
+                }}
+              >
+                {deductFridge ? 'BẬT' : 'TẮT'}
+              </span>
+            </div>
           </div>
         )}
 
@@ -470,8 +544,9 @@ export default function CartModal({
               ? mergedItems.map((item) => {
                   const itemKey = `merged-${item.groupKey}`;
                   const isDone = !!checkedItems[itemKey];
+                  const inFridge = deductFridge && item.inFridge;
                   const uPrice = getUnitPrice(item.key);
-                  const itemTotal = Math.round(item.totalQuantity * uPrice);
+                  const itemTotal = inFridge ? 0 : Math.round(item.totalQuantity * uPrice);
 
                   return (
                     <div
@@ -479,7 +554,8 @@ export default function CartModal({
                       style={{
                         ...cartStyles.item,
                         opacity: isDone ? 0.55 : 1,
-                        backgroundColor: isDone ? '#edf2f7' : '#f8f9fa',
+                        backgroundColor: inFridge ? '#ebf8ff' : isDone ? '#edf2f7' : '#f8f9fa',
+                        borderColor: inFridge ? '#bee3f8' : '#edf2f7',
                       }}
                       onClick={() => toggleChecked(itemKey)}
                     >
@@ -503,32 +579,44 @@ export default function CartModal({
                           <span style={cartStyles.qtyBadge}>
                             {item.totalQuantity} {item.unit}
                           </span>
-                          <span style={cartStyles.packBadge}>
-                            {item.suggested}
-                          </span>
+                          {inFridge ? (
+                            <span style={cartStyles.fridgeBadge}>
+                              🧊 Có sẵn trong tủ lạnh
+                            </span>
+                          ) : (
+                            <span style={cartStyles.packBadge}>
+                              {item.suggested}
+                            </span>
+                          )}
                         </div>
                         <span style={cartStyles.dishName}>Dùng cho: {item.dishes.join(', ')}</span>
                       </div>
 
-                      {/* Cột chỉnh đơn vị giá & xem thành tiền */}
+                      {/* Cột giá & thành tiền */}
                       <div
                         style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                          <input
-                            type="number"
-                            step="100"
-                            value={uPrice}
-                            onChange={(e) => handleUnitPriceChange(item.key, e.target.value)}
-                            style={cartStyles.priceInput}
-                            title={`Đơn giá cho mỗi ${item.unit}`}
-                          />
-                          <span style={{ fontSize: '0.7rem', color: '#718096' }}>đ/{item.unit}</span>
-                        </div>
-                        <span style={cartStyles.totalItemPrice}>
-                          ~{itemTotal.toLocaleString('vi-VN')} đ
-                        </span>
+                        {inFridge ? (
+                          <span style={{ fontSize: '0.8rem', color: '#3182ce', fontWeight: '700' }}>0 đ</span>
+                        ) : (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                              <input
+                                type="number"
+                                step="100"
+                                value={uPrice}
+                                onChange={(e) => handleUnitPriceChange(item.key, e.target.value)}
+                                style={cartStyles.priceInput}
+                                title={`Đơn giá cho mỗi ${item.unit}`}
+                              />
+                              <span style={{ fontSize: '0.7rem', color: '#718096' }}>đ/{item.unit}</span>
+                            </div>
+                            <span style={cartStyles.totalItemPrice}>
+                              ~{itemTotal.toLocaleString('vi-VN')} đ
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   );
@@ -537,8 +625,9 @@ export default function CartModal({
                   const itemKey = `single-${item.id}`;
                   const isDone = !!checkedItems[itemKey];
                   const parsed = parseIngredient(item.text);
+                  const inFridge = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
                   const uPrice = getUnitPrice(parsed.cleanKey);
-                  const itemTotal = Math.round(parsed.quantity * uPrice);
+                  const itemTotal = inFridge ? 0 : Math.round(parsed.quantity * uPrice);
 
                   return (
                     <div
@@ -546,7 +635,8 @@ export default function CartModal({
                       style={{
                         ...cartStyles.item,
                         opacity: isDone ? 0.55 : 1,
-                        backgroundColor: isDone ? '#edf2f7' : '#f8f9fa',
+                        backgroundColor: inFridge ? '#ebf8ff' : isDone ? '#edf2f7' : '#f8f9fa',
+                        borderColor: inFridge ? '#bee3f8' : '#edf2f7',
                       }}
                       onClick={() => toggleChecked(itemKey)}
                     >
@@ -565,6 +655,11 @@ export default function CartModal({
                           }}
                         >
                           {item.text}
+                          {inFridge && (
+                            <span style={{ ...cartStyles.fridgeBadge, marginLeft: '6px' }}>
+                              🧊 Có sẵn trong tủ
+                            </span>
+                          )}
                         </p>
                       </div>
 
@@ -573,11 +668,13 @@ export default function CartModal({
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span style={cartStyles.totalItemPrice}>
-                          ~{itemTotal.toLocaleString('vi-VN')} đ
+                          {inFridge ? '0 đ' : `~${itemTotal.toLocaleString('vi-VN')} đ`}
                         </span>
-                        <span style={{ fontSize: '0.68rem', color: '#a0aec0' }}>
-                          ({uPrice.toLocaleString('vi-VN')}đ/{parsed.unit})
-                        </span>
+                        {!inFridge && (
+                          <span style={{ fontSize: '0.68rem', color: '#a0aec0' }}>
+                            ({uPrice.toLocaleString('vi-VN')}đ/{parsed.unit})
+                          </span>
+                        )}
                       </div>
 
                       <button
@@ -600,16 +697,23 @@ export default function CartModal({
         {shoppingList.length > 0 && (
           <div style={cartStyles.footer}>
             <div style={cartStyles.totalBox}>
-              <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: '600' }}>
-                Tổng tiền ước tính:
-              </span>
+              <div>
+                <span style={{ fontSize: '0.85rem', color: '#555', fontWeight: '600', display: 'block' }}>
+                  Tổng tiền dự toán cần chi:
+                </span>
+                {deductFridge && (
+                  <span style={{ fontSize: '0.72rem', color: '#319795' }}>
+                    (Đã trừ bớt các món có trong tủ lạnh)
+                  </span>
+                )}
+              </div>
               <span style={{ fontSize: '1.3rem', color: '#e67e22', fontWeight: '800' }}>
                 ~{totalCost.toLocaleString('vi-VN')} <span style={{ fontSize: '0.85rem' }}>VNĐ</span>
               </span>
             </div>
 
             <button onClick={handleCopyForZalo} style={cartStyles.btnZalo}>
-              📲 Gửi Zalo kèm bảng tính & gợi ý mua
+              📲 Gửi Zalo danh sách mua & đồ có sẵn
             </button>
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
               <button onClick={handleExportExcel} style={cartStyles.btnExcel}>
@@ -638,7 +742,7 @@ const cartStyles = {
   modal: {
     backgroundColor: '#fff',
     borderRadius: '24px',
-    maxWidth: '560px',
+    maxWidth: '580px',
     width: '100%',
     maxHeight: '88vh',
     display: 'flex',
@@ -669,7 +773,7 @@ const cartStyles = {
     fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer',
   },
   tabContainer: {
-    display: 'flex', gap: '8px', marginBottom: '14px',
+    display: 'flex', gap: '8px',
     background: '#f1f2f6', padding: '4px', borderRadius: '12px',
   },
   tabBtn: {
@@ -690,6 +794,7 @@ const cartStyles = {
   item: {
     display: 'flex', alignItems: 'center', padding: '10px 12px',
     borderRadius: '12px', border: '1px solid #edf2f7', cursor: 'pointer',
+    transition: 'all 0.15s ease',
   },
   dishName: {
     fontSize: '0.75rem', color: '#e67e22', fontWeight: '600', display: 'block', marginTop: '3px',
@@ -713,6 +818,15 @@ const cartStyles = {
     padding: '2px 8px',
     borderRadius: '6px',
     border: '1px solid #c6f6d5',
+  },
+  fridgeBadge: {
+    backgroundColor: '#e6fffa',
+    color: '#319795',
+    fontSize: '0.72rem',
+    fontWeight: '600',
+    padding: '2px 8px',
+    borderRadius: '6px',
+    border: '1px solid #81e6d9',
   },
   priceInput: {
     width: '60px',
