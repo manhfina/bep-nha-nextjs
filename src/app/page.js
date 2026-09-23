@@ -15,6 +15,7 @@ import AuthModal from '../components/AuthModal';
 import FamilyKitchenModal from '../components/FamilyKitchenModal';
 import AdminRolesModal from '../components/AdminRolesModal';
 import PwaInstallPrompt from '../components/PwaInstallPrompt';
+import PushNotificationButton from '@/components/PushNotificationButton';
 import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
 import { getCachedData, setCachedData, fetchWithDedupe, CacheKeys } from '@/lib/cacheManager';
 
@@ -593,6 +594,9 @@ export default function Home() {
       >
         <h1 style={{ margin: 0 }}>🍳 Bếp Nhà Món Ngon</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Nút Nhận thông báo nhắc giờ nấu ăn */}
+          <PushNotificationButton currentUser={user} currentKitchen={kitchenData?.kitchen} />
+
           {/* Nút Cài đặt App hiển thị trực tiếp trên Header */}
           <button
             onClick={handleInstallApp}
