@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import RecipeCard from '../components/RecipeCard';
 import RecipeDetailModal from '../components/RecipeDetailModal';
@@ -28,6 +28,10 @@ export default function Home() {
   const [favorites, setFavorites] = useState([]);
   const [shoppingList, setShoppingList] = useState([]);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+
+  // Trạng thái menu rút gọn trên Header
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const menuRef = useRef(null);
 
   // Trạng thái mạng ngoại tuyến
   const [isOffline, setIsOffline] = useState(false);
@@ -72,6 +76,17 @@ export default function Home() {
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
+
+  // Đóng menu khi bấm ra ngoài
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setIsHeaderMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -294,7 +309,6 @@ export default function Home() {
       setUser(session?.user ?? null);
     });
 
-    // Realtime Recipes
     const recipeChannel = supabase
       .channel('realtime-recipes')
       .on(
@@ -329,7 +343,6 @@ export default function Home() {
       )
       .subscribe();
 
-    // Realtime Shopping List
     const cartChannel = supabase
       .channel('realtime-shopping-list')
       .on(
@@ -648,217 +661,180 @@ export default function Home() {
 
   return (
     <div className="container">
-      {/* Header */}
+      {/* HEADER TỐI ƯU MOBILE-FIRST */}
       <header
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-          marginBottom: '15px',
+          padding: '8px 0',
+          marginBottom: '12px',
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          position: 'relative',
         }}
       >
-        <h1 style={{ margin: 0 }}>🍳 Bếp Nhà Món Ngon</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {/* Nút Nhận thông báo nhắc giờ nấu ăn */}
+        <h1 style={{ margin: 0, fontSize: '1.45rem', fontWeight: '800', color: '#e67e22', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span>🍳</span> Bếp Nhà
+        </h1>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Chuông nhắc giờ ăn */}
           <PushNotificationButton currentUser={user} currentKitchen={kitchenData?.kitchen} />
 
-          {/* Nút Báo cáo Chi tiêu & Dinh dưỡng (Hướng 4) */}
-          <button
-            onClick={() => setIsStatsOpen(true)}
-            style={{
-              padding: '7px 12px',
-              borderRadius: '10px',
-              border: '1px solid #16a085',
-              background: '#e8f8f5',
-              color: '#16a085',
-              fontSize: '0.82rem',
-              cursor: 'pointer',
-              fontWeight: '700',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              boxShadow: '0 1px 4px rgba(22, 160, 133, 0.15)',
-            }}
-            title="Xem phân bổ dinh dưỡng và số tiền tiết kiệm trong tuần"
-          >
-            📊 Báo cáo
-          </button>
-
-          {/* Nút Bếp Sạch - Nhà No (Hướng 5) */}
-          <button
-            onClick={() => setIsZeroWasteOpen(true)}
-            style={{
-              padding: '7px 12px',
-              borderRadius: '10px',
-              border: '1px solid #27ae60',
-              background: '#f0fff4',
-              color: '#27ae60',
-              fontSize: '0.82rem',
-              cursor: 'pointer',
-              fontWeight: '700',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              boxShadow: '0 1px 4px rgba(39, 174, 96, 0.15)',
-            }}
-            title="Quản lý hạn dùng thực phẩm & Khẩu vị gia đình"
-          >
-            🌱 Bếp Sạch
-          </button>
-
-          {/* Nút Quét ảnh AI (Hướng 2) */}
-          <button
-            onClick={() => setIsScannerOpen(true)}
-            style={{
-              padding: '7px 12px',
-              borderRadius: '10px',
-              border: '1px solid #8e44ad',
-              background: '#fbf7ff',
-              color: '#8e44ad',
-              fontSize: '0.82rem',
-              cursor: 'pointer',
-              fontWeight: '700',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              boxShadow: '0 1px 4px rgba(142, 68, 173, 0.15)',
-            }}
-            title="Chụp ảnh quét tủ lạnh hoặc bóc tách hóa đơn đi chợ tự động"
-          >
-            📸 Quét AI
-          </button>
-
-          {/* Nút Cài đặt App */}
-          <button
-            onClick={handleInstallApp}
-            style={{
-              padding: '7px 12px',
-              borderRadius: '10px',
-              border: '1px solid #2980b9',
-              background: '#ebf8ff',
-              color: '#2980b9',
-              fontSize: '0.82rem',
-              cursor: 'pointer',
-              fontWeight: '700',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              boxShadow: '0 1px 4px rgba(41, 128, 185, 0.15)',
-            }}
-            title="Cài đặt ứng dụng về điện thoại hoặc máy tính"
-          >
-            📲 Cài App
-          </button>
-
-          {user ? (
-            <>
-              <button
-                onClick={() => setIsKitchenOpen(true)}
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: '10px',
-                  border: '1px solid #e67e22',
-                  background: kitchenData?.kitchen ? '#fffaf0' : '#fff',
-                  color: '#e67e22',
-                  fontSize: '0.82rem',
-                  cursor: 'pointer',
-                  fontWeight: '700',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
-                🏡 {kitchenData?.kitchen ? kitchenData.kitchen.name : 'Vào Bếp gia đình'}
-              </button>
-
-              {isUserAdmin(user, { role: userRole }) && (
-                <button
-                  onClick={() => setIsAdminModalOpen(true)}
-                  style={{
-                    padding: '7px 12px',
-                    borderRadius: '10px',
-                    border: '1px solid #e74c3c',
-                    background: '#fff5f5',
-                    color: '#e74c3c',
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                    fontWeight: '700',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  🛡️ Phân quyền
-                </button>
-              )}
-
-              <span
-                style={{
-                  fontSize: '0.85rem',
-                  color: '#2d3436',
-                  fontWeight: '600',
-                  background: '#f1f2f6',
-                  padding: '6px 12px',
-                  borderRadius: '10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <span>👤 {getUserDisplayName()}</span>
-                {userRole === 'admin' && (
-                  <span style={{ fontSize: '0.7rem', background: '#e74c3c', color: '#fff', padding: '2px 6px', borderRadius: '6px', fontWeight: '800' }}>
-                    ADMIN
-                  </span>
-                )}
-                {userRole === 'editor' && (
-                  <span style={{ fontSize: '0.7rem', background: '#27ae60', color: '#fff', padding: '2px 6px', borderRadius: '6px', fontWeight: '800' }}>
-                    ĐẦU BẾP
-                  </span>
-                )}
-              </span>
-
-              <button
-                onClick={async () => {
-                  await supabase.auth.signOut();
-                  setUser(null);
-                  setKitchenData(null);
-                  setUserRole('viewer');
-                  alert('Đã đăng xuất!');
-                }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '10px',
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                }}
-              >
-                Đăng xuất
-              </button>
-            </>
-          ) : (
+          {/* Nút Menu Cá Nhân & Tiện Ích */}
+          <div ref={menuRef} style={{ position: 'relative' }}>
             <button
-              onClick={() => setIsAuthOpen(true)}
+              onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}
               style={{
-                padding: '8px 16px',
-                borderRadius: '10px',
-                border: 'none',
-                background: '#2d3436',
-                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 12px',
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                background: user ? '#f8fafc' : '#2d3436',
+                color: user ? '#2d3436' : '#fff',
                 fontSize: '0.85rem',
                 cursor: 'pointer',
                 fontWeight: '700',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
               }}
+              title="Mở menu tiện ích"
             >
-              🔑 Đăng nhập
+              <span>{user ? '👤' : '🔑'}</span>
+              <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user ? getUserDisplayName() : 'Đăng nhập'}
+              </span>
+              <span style={{ fontSize: '0.65rem' }}>▼</span>
             </button>
-          )}
+
+            {/* Menu Dropdown gọn gàng */}
+            {isHeaderMenuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '115%',
+                  right: 0,
+                  backgroundColor: '#ffffff',
+                  borderRadius: '16px',
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+                  border: '1px solid #e2e8f0',
+                  padding: '8px',
+                  minWidth: '220px',
+                  zIndex: 10001,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }}
+              >
+                {user ? (
+                  <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f2f6', marginBottom: '4px' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#718096' }}>Tài khoản đang đăng nhập:</div>
+                    <div style={{ fontWeight: '700', color: '#2d3436', fontSize: '0.88rem' }}>{getUserDisplayName()}</div>
+                    {userRole === 'admin' && (
+                      <span style={{ fontSize: '0.65rem', background: '#e74c3c', color: '#fff', padding: '1px 6px', borderRadius: '6px', fontWeight: '800' }}>
+                        ADMIN
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setIsAuthOpen(true);
+                      setIsHeaderMenuOpen(false);
+                    }}
+                    style={menuItemStyle}
+                  >
+                    🔑 Đăng nhập / Đăng ký
+                  </button>
+                )}
+
+                {/* Các tiện ích chính */}
+                <button
+                  onClick={() => {
+                    setIsScannerOpen(true);
+                    setIsHeaderMenuOpen(false);
+                  }}
+                  style={menuItemStyle}
+                >
+                  📸 Quét ảnh AI (Tủ lạnh/Hóa đơn)
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsStatsOpen(true);
+                    setIsHeaderMenuOpen(false);
+                  }}
+                  style={menuItemStyle}
+                >
+                  📊 Báo cáo Dinh dưỡng & Chi tiêu
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsZeroWasteOpen(true);
+                    setIsHeaderMenuOpen(false);
+                  }}
+                  style={menuItemStyle}
+                >
+                  🌱 Bếp Sạch - Zero Waste & Khẩu vị
+                </button>
+
+                {user && (
+                  <button
+                    onClick={() => {
+                      setIsKitchenOpen(true);
+                      setIsHeaderMenuOpen(false);
+                    }}
+                    style={menuItemStyle}
+                  >
+                    🏡 {kitchenData?.kitchen ? kitchenData.kitchen.name : 'Vào Bếp Gia Đình'}
+                  </button>
+                )}
+
+                {isUserAdmin(user, { role: userRole }) && (
+                  <button
+                    onClick={() => {
+                      setIsAdminModalOpen(true);
+                      setIsHeaderMenuOpen(false);
+                    }}
+                    style={{ ...menuItemStyle, color: '#e74c3c' }}
+                  >
+                    🛡️ Phân quyền quản trị
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    handleInstallApp();
+                    setIsHeaderMenuOpen(false);
+                  }}
+                  style={menuItemStyle}
+                >
+                  📲 Cài App về máy (PWA)
+                </button>
+
+                {user && (
+                  <>
+                    <div style={{ height: '1px', background: '#f1f2f6', margin: '4px 0' }} />
+                    <button
+                      onClick={async () => {
+                        await supabase.auth.signOut();
+                        setUser(null);
+                        setKitchenData(null);
+                        setUserRole('viewer');
+                        setIsHeaderMenuOpen(false);
+                        alert('Đã đăng xuất!');
+                      }}
+                      style={{ ...menuItemStyle, color: '#e74c3c' }}
+                    >
+                      🚪 Đăng xuất
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -1157,7 +1133,7 @@ export default function Home() {
         priceMap={priceMap}
       />
 
-      {/* Modal Chế độ nấu ăn (Gamification Cooking Streak) */}
+      {/* Modal Chế độ nấu ăn */}
       <CookModeModal
         recipe={cookModeRecipe}
         step={cookStep}
@@ -1167,7 +1143,6 @@ export default function Home() {
           if (cookModeRecipe?.steps && cookStep < cookModeRecipe.steps.length - 1) {
             setCookStep(cookStep + 1);
           } else {
-            // Tăng chuỗi ngày nấu ăn khi hoàn thành món
             try {
               const currentStreak = parseInt(localStorage.getItem('bepnha_cooking_streak') || '1', 10);
               const nextStreak = currentStreak + 1;
@@ -1278,7 +1253,7 @@ export default function Home() {
         priceMap={priceMap}
       />
 
-      {/* Modal Bếp Sạch - Nhà No (Hướng 5) */}
+      {/* Modal Bếp Sạch - Nhà No */}
       <ZeroWasteProfileModal
         isOpen={isZeroWasteOpen}
         onClose={() => setIsZeroWasteOpen(false)}
@@ -1314,3 +1289,19 @@ export default function Home() {
     </div>
   );
 }
+
+const menuItemStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '10px 12px',
+  borderRadius: '10px',
+  border: 'none',
+  backgroundColor: 'transparent',
+  color: '#2d3436',
+  fontSize: '0.84rem',
+  fontWeight: '600',
+  textAlign: 'left',
+  cursor: 'pointer',
+  transition: 'background-color 0.15s ease',
+  width: '100%',
+};
