@@ -16,6 +16,7 @@ import FamilyKitchenModal from '../components/FamilyKitchenModal';
 import AdminRolesModal from '../components/AdminRolesModal';
 import PwaInstallPrompt from '../components/PwaInstallPrompt';
 import PushNotificationButton from '@/components/PushNotificationButton';
+import AiScannerModal from '../components/AiScannerModal';
 import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
 import { getCachedData, setCachedData, fetchWithDedupe, CacheKeys } from '@/lib/cacheManager';
 
@@ -32,7 +33,7 @@ export default function Home() {
   // Bảng giá nguyên liệu
   const [priceMap, setPriceMap] = useState({});
 
-  // Kho nguyên liệu tồn kho tủ lạnh (State dùng chung toàn trang)
+  // Kho nguyên liệu tồn kho tủ lạnh
   const [fridgeItems, setFridgeItems] = useState([]);
 
   // Prompt cài đặt PWA
@@ -62,30 +63,27 @@ export default function Home() {
   const [isRandomOpen, setIsRandomOpen] = useState(false);
   const [isFridgeOpen, setIsFridgeOpen] = useState(false);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   // Cook mode state
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
 
-  // Nạp tồn kho tủ lạnh, đăng ký Service Worker & bắt prompt cài đặt PWA
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // 1. Đăng ký Service Worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('/sw.js')
         .catch((err) => console.warn('Lỗi đăng ký Service Worker:', err));
     }
 
-    // 2. Bắt prompt cài đặt PWA an toàn
     const handleBeforeInstall = (e) => {
       e.preventDefault();
       setPwaPrompt(e);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
 
-    // 3. Nạp tồn kho tủ lạnh
     try {
       const savedFridge = localStorage.getItem('bepnha_fridge_items');
       if (savedFridge) {
@@ -100,7 +98,6 @@ export default function Home() {
     };
   }, []);
 
-  // Xử lý khi bấm nút Cài App
   const handleInstallApp = () => {
     if (typeof window === 'undefined') return;
 
@@ -123,7 +120,6 @@ export default function Home() {
     }
   };
 
-  // Hàm cập nhật kho tủ lạnh và lưu localStorage
   const handleUpdateFridge = (newItems) => {
     setFridgeItems(newItems);
     if (typeof window !== 'undefined') {
@@ -135,7 +131,42 @@ export default function Home() {
     }
   };
 
-  // Chuẩn hóa dữ liệu món ăn
+  // Thêm nhanh từ AI Scanner vào tủ lạnh
+  const handleAddFridgeFromScanner = (newNames = []) => {
+    const existing = new Set(fridgeItems.map((f) => f.toLowerCase().trim()));
+    const merged = [...fridgeItems];
+
+    newNames.forEach((name) => {
+      if (!existing.has(name.toLowerCase().trim())) {
+        merged.push(name);
+        existing.add(name.toLowerCase().trim());
+      }
+    });
+
+    handleUpdateFridge(merged);
+  };
+
+  // Thêm nhanh từ AI Scanner hóa đơn vào giỏ đi chợ
+  const handleAddCartFromScanner = async (newCartItems = []) => {
+    try {
+      const res = await fetch('/api/shopping-list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: newCartItems,
+          userId: user?.id || null,
+          kitchenId: kitchenData?.kitchen?.id || null,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Không thể thêm món vào giỏ');
+      const addedData = await res.json();
+      setShoppingList((prev) => [...prev, ...addedData]);
+    } catch (err) {
+      alert('Lỗi nạp giỏ hàng: ' + err.message);
+    }
+  };
+
   const formatRecipe = (item) => ({
     ...item,
     desc: item.desc || item.description || '',
@@ -148,7 +179,6 @@ export default function Home() {
     steps: item.steps || item.instructions || [],
   });
 
-  // 1. Tải công thức với cơ chế SWR
   const fetchRecipes = async () => {
     const cached = getCachedData(CacheKeys.RECIPES);
     if (cached && Array.isArray(cached) && cached.length > 0) {
@@ -174,7 +204,6 @@ export default function Home() {
     }
   };
 
-  // 2. Tải thông tin Bếp gia đình
   const fetchKitchen = async (currentUserId) => {
     if (!currentUserId) {
       setKitchenData(null);
@@ -189,7 +218,6 @@ export default function Home() {
     }
   };
 
-  // 3. Tải favorites và shopping-list
   const loadUserData = (currentUserId, currentKitchenId) => {
     const params = new URLSearchParams();
     if (currentUserId) params.set('userId', currentUserId);
@@ -211,7 +239,6 @@ export default function Home() {
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
   };
 
-  // 4. Tải từ điển giá với cơ chế Cache-First
   const fetchPrices = async () => {
     const cachedPrices = getCachedData(CacheKeys.PRICES);
     if (cachedPrices && Object.keys(cachedPrices).length > 0) {
@@ -229,7 +256,6 @@ export default function Home() {
     }
   };
 
-  // Lắng nghe mạng Online/Offline
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setIsOffline(!navigator.onLine);
@@ -251,7 +277,6 @@ export default function Home() {
     }
   }, []);
 
-  // Supabase Auth & Realtime
   useEffect(() => {
     fetchRecipes();
     fetchPrices();
@@ -306,7 +331,6 @@ export default function Home() {
     };
   }, []);
 
-  // Kiểm tra vai trò
   useEffect(() => {
     if (user) {
       fetchKitchen(user.id);
@@ -334,7 +358,6 @@ export default function Home() {
 
   const hasPermission = canManageRecipe(user, { role: userRole });
 
-  // Xóa công thức
   const handleDeleteRecipe = async (id) => {
     if (!window.confirm('Bạn có chắc chắn muốn xóa món ăn này không?')) {
       return;
@@ -597,6 +620,28 @@ export default function Home() {
           {/* Nút Nhận thông báo nhắc giờ nấu ăn */}
           <PushNotificationButton currentUser={user} currentKitchen={kitchenData?.kitchen} />
 
+          {/* Nút Quét ảnh AI (Tủ lạnh / Hóa đơn) */}
+          <button
+            onClick={() => setIsScannerOpen(true)}
+            style={{
+              padding: '7px 12px',
+              borderRadius: '10px',
+              border: '1px solid #8e44ad',
+              background: '#fbf7ff',
+              color: '#8e44ad',
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              boxShadow: '0 1px 4px rgba(142, 68, 173, 0.15)',
+            }}
+            title="Chụp ảnh quét tủ lạnh hoặc bóc tách hóa đơn đi chợ tự động"
+          >
+            📸 Quét AI
+          </button>
+
           {/* Nút Cài đặt App hiển thị trực tiếp trên Header */}
           <button
             onClick={handleInstallApp}
@@ -832,7 +877,6 @@ export default function Home() {
           border: '1px solid rgba(0,0,0,0.05)',
         }}
       >
-        {/* Thanh hiển thị Tồn kho tủ lạnh động */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'bold' }}>🧊 Tủ lạnh:</span>
           {(!fridgeItems || fridgeItems.length === 0) ? (
@@ -1070,6 +1114,7 @@ export default function Home() {
             alert('Lỗi khi dọn giỏ: ' + err.message);
           }
         }}
+        priceMap={priceMap}
       />
 
       {/* Modal Thêm công thức */}
@@ -1096,7 +1141,7 @@ export default function Home() {
         onOpenDetail={openDetail}
       />
 
-      {/* Modal Dọn tủ lạnh (Đồng bộ tuyệt đối hai chiều) */}
+      {/* Modal Dọn tủ lạnh */}
       <FridgeCleanerModal
         isOpen={isFridgeOpen}
         onClose={() => setIsFridgeOpen(false)}
@@ -1116,6 +1161,14 @@ export default function Home() {
         onAddPlanToCart={handleAddPlanToCart}
         currentUserId={user?.id}
         currentKitchenId={kitchenData?.kitchen?.id}
+      />
+
+      {/* Modal Quét Ảnh AI (Smart Receipt OCR & Fridge Vision) */}
+      <AiScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onAddFridgeItems={handleAddFridgeFromScanner}
+        onAddCartItems={handleAddCartFromScanner}
       />
 
       {/* Modal Đăng nhập / Đăng ký */}
