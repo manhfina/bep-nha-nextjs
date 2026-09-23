@@ -17,9 +17,15 @@
       "purpose": "any"
     },
     {
-      "src": "/globe.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=192&h=192&fit=crop&crop=faces",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=512&h=512&fit=crop&crop=faces",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]

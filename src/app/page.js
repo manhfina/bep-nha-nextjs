@@ -63,9 +63,17 @@ export default function Home() {
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
 
-  // Nạp tồn kho tủ lạnh từ LocalStorage lúc khởi tạo
+  // Nạp tồn kho tủ lạnh từ LocalStorage & Đăng ký Service Worker cho PWA
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      // 1. Đăng ký Service Worker
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker
+          .register('/sw.js')
+          .catch((err) => console.warn('Lỗi đăng ký Service Worker:', err));
+      }
+
+      // 2. Nạp tồn kho tủ lạnh
       try {
         const savedFridge = localStorage.getItem('bepnha_fridge_items');
         if (savedFridge) {
