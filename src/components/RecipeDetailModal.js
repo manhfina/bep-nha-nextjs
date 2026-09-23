@@ -2,7 +2,123 @@
 import { useState, useEffect } from 'react';
 import ShareRecipeModal from './ShareRecipeModal';
 import { calculateIngredientCost, calculateRecipeTotalCost } from '@/lib/priceCalculator';
-import { calculateRecipeNutrition } from '@/lib/nutritionCalculator';
+
+// Bảng dữ liệu dinh dưỡng cục bộ (trên 100g hoặc 1 đơn vị đếm)
+const NUTRITION_DATABASE = {
+  'thịt bò': { cal: 250, protein: 26, carbs: 0, fat: 15 },
+  'bắp bò': { cal: 215, protein: 28, carbs: 0, fat: 11 },
+  'thịt heo': { cal: 242, protein: 27, carbs: 0, fat: 14 },
+  'thịt lợn': { cal: 242, protein: 27, carbs: 0, fat: 14 },
+  'thịt ba chỉ': { cal: 518, protein: 12, carbs: 0, fat: 53 },
+  'thịt xay': { cal: 260, protein: 18, carbs: 0, fat: 21 },
+  'thịt gà': { cal: 165, protein: 31, carbs: 0, fat: 3.6 },
+  'ức gà': { cal: 165, protein: 31, carbs: 0, fat: 3.6 },
+  'cua đồng': { cal: 89, protein: 12.3, carbs: 2, fat: 3.3 },
+  'tôm': { cal: 99, protein: 24, carbs: 0.2, fat: 0.3 },
+  'mực': { cal: 92, protein: 15.6, carbs: 3.1, fat: 1.4 },
+  'cá': { cal: 105, protein: 18, carbs: 0, fat: 3.5 },
+  'trứng': { cal: 72, protein: 6.3, carbs: 0.4, fat: 4.8 },
+  'đậu phụ': { cal: 76, protein: 8, carbs: 1.9, fat: 4.8 },
+  'mì': { cal: 138, protein: 4.5, carbs: 28, fat: 1.1 },
+  'bún': { cal: 110, protein: 1.7, carbs: 25.7, fat: 0 },
+  'cơm': { cal: 130, protein: 2.7, carbs: 28.2, fat: 0.3 },
+  'cà chua': { cal: 18, protein: 0.9, carbs: 3.9, fat: 0.2 },
+  'cà tím': { cal: 25, protein: 1, carbs: 6, fat: 0.2 },
+  'cà rốt': { cal: 41, protein: 0.9, carbs: 9.6, fat: 0.2 },
+  'khoai tây': { cal: 77, protein: 2, carbs: 17, fat: 0.1 },
+  'rau cải': { cal: 15, protein: 1.5, carbs: 2.2, fat: 0.2 },
+  'cải ngọt': { cal: 16, protein: 1.7, carbs: 2.5, fat: 0.2 },
+  'rau muống': { cal: 19, protein: 3, carbs: 2.1, fat: 0.4 },
+  'cần tây': { cal: 16, protein: 0.7, carbs: 3, fat: 0.2 },
+  'nấm': { cal: 22, protein: 3.1, carbs: 3.3, fat: 0.3 },
+  'dầu ăn': { cal: 884, protein: 0, carbs: 0, fat: 100 },
+};
+
+function getNutrientInfo(rawName = '') {
+  const name = rawName.toLowerCase();
+  for (const [key, val] of Object.entries(NUTRITION_DATABASE)) {
+    if (name.includes(key) || key.includes(name)) return val;
+  }
+  return { cal: 35, protein: 1.2, carbs: 6, fat: 0.5 };
+}
+
+function parseIngData(ing) {
+  if (typeof ing === 'object' && ing !== null) {
+    return {
+      name: (ing.name || '').toLowerCase().trim(),
+      amount: parseFloat(ing.amount || ing.amountPerPerson || 100) || 100,
+      unit: (ing.unit || 'g').toLowerCase().trim(),
+    };
+  }
+
+  const rawText = String(ing || '').toLowerCase().trim();
+  let name = rawText;
+  let amount = 100;
+  let unit = 'g';
+
+  const matchColon = rawText.match(/^(.*?):\s*([\d.,]+)\s*(.*)$/);
+  if (matchColon) {
+    name = matchColon[1].trim();
+    amount = parseFloat(matchColon[2].replace(',', '.')) || 100;
+    unit = matchColon[3].trim() || 'g';
+  } else {
+    const matchPrefix = rawText.match(/^([\d.,]+)\s*([a-zA-Zà-ỹ]+)?\s+(.+)$/);
+    if (matchPrefix) {
+      amount = parseFloat(matchPrefix[1].replace(',', '.')) || 100;
+      unit = matchPrefix[2]?.trim() || 'g';
+      name = matchPrefix[3].trim();
+    }
+  }
+
+  return { name, amount, unit };
+}
+
+function calcNutrition(ingredients = [], servings = 2, baseServings = 2) {
+  if (!Array.isArray(ingredients) || ingredients.length === 0) {
+    return { calories: 0, protein: 0, carbs: 0, fat: 0, caloriesPerServing: 0 };
+  }
+
+  const ratio = (servings || 2) / (baseServings || 2);
+  let totalCal = 0;
+  let totalProtein = 0;
+  let totalCarbs = 0;
+  let totalFat = 0;
+
+  ingredients.forEach((ing) => {
+    const { name, amount, unit } = parseIngData(ing);
+    const info = getNutrientInfo(name);
+
+    let weightFactor = 1;
+    if (['g', 'gram', 'gr'].includes(unit)) {
+      weightFactor = amount / 100;
+    } else if (unit === 'kg') {
+      weightFactor = (amount * 1000) / 100;
+    } else if (unit === 'lạng') {
+      weightFactor = (amount * 100) / 100;
+    } else if (['quả', 'trái', 'bìa', 'miếng', 'vắt', 'củ'].includes(unit)) {
+      weightFactor = amount;
+    } else if (['thìa', 'muỗng', 'ít', 'chút'].includes(unit)) {
+      weightFactor = 0.1;
+    }
+
+    const cur = weightFactor * ratio;
+    totalCal += info.cal * cur;
+    totalProtein += info.protein * cur;
+    totalCarbs += info.carbs * cur;
+    totalFat += info.fat * cur;
+  });
+
+  const finalCal = Math.round(totalCal);
+  const count = Math.max(1, servings);
+
+  return {
+    calories: finalCal,
+    protein: Math.round(totalProtein * 10) / 10,
+    carbs: Math.round(totalCarbs * 10) / 10,
+    fat: Math.round(totalFat * 10) / 10,
+    caloriesPerServing: Math.round(finalCal / count),
+  };
+}
 
 export default function RecipeDetailModal({
   recipe,
@@ -16,17 +132,14 @@ export default function RecipeDetailModal({
   currentKitchen,
   priceMap = {},
 }) {
-  const [activeTab, setActiveTab] = useState('recipe'); // 'recipe' | 'notes'
+  const [activeTab, setActiveTab] = useState('recipe');
   const [notes, setNotes] = useState([]);
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [newRating, setNewRating] = useState(5);
   const [newNote, setNewNote] = useState('');
   const [submittingNote, setSubmittingNote] = useState(false);
-
-  // State mở modal chia sẻ QR
   const [isShareOpen, setIsShareOpen] = useState(false);
 
-  // Tải danh sách ghi chú
   const fetchNotes = async () => {
     if (!recipe?.id) return;
     setLoadingNotes(true);
@@ -54,11 +167,8 @@ export default function RecipeDetailModal({
 
   if (!recipe) return null;
 
-  // Tính tổng chi phí theo khẩu phần hiện tại
   const totalCost = calculateRecipeTotalCost(recipe, priceMap, servings);
-
-  // Tính giá trị dinh dưỡng & Macro tự động theo khẩu phần
-  const nutrition = calculateRecipeNutrition(recipe.ingredients || [], servings, recipe.baseServings || 2);
+  const nutrition = calcNutrition(recipe.ingredients || [], servings, recipe.baseServings || 2);
 
   const handleAddNote = async (e) => {
     e.preventDefault();
@@ -188,7 +298,7 @@ export default function RecipeDetailModal({
                   </div>
                 </div>
 
-                {/* BẢNG DINH DƯỠNG & MACRO (Tự co giãn theo khẩu phần) */}
+                {/* BẢNG DINH DƯỠNG & MACRO */}
                 <div style={styles.macroCard}>
                   <div style={styles.macroHeader}>
                     <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#2d3436' }}>
@@ -201,19 +311,19 @@ export default function RecipeDetailModal({
 
                   <div style={styles.macroGrid}>
                     <div style={{ ...styles.macroItem, backgroundColor: '#fff5f5' }}>
-                      <span style={styles.macroLabel}>🔥 Tổng Năng lượng</span>
+                      <span style={styles.macroLabel}>🔥 Năng lượng</span>
                       <strong style={{ ...styles.macroVal, color: '#e74c3c' }}>{nutrition.calories} kcal</strong>
                     </div>
                     <div style={{ ...styles.macroItem, backgroundColor: '#f0fff4' }}>
-                      <span style={styles.macroLabel}>🥩 Đạm (Protein)</span>
+                      <span style={styles.macroLabel}>🥩 Đạm</span>
                       <strong style={{ ...styles.macroVal, color: '#27ae60' }}>{nutrition.protein}g</strong>
                     </div>
                     <div style={{ ...styles.macroItem, backgroundColor: '#fffaf0' }}>
-                      <span style={styles.macroLabel}>🌾 Tinh bột (Carbs)</span>
+                      <span style={styles.macroLabel}>🌾 Tinh bột</span>
                       <strong style={{ ...styles.macroVal, color: '#d35400' }}>{nutrition.carbs}g</strong>
                     </div>
                     <div style={{ ...styles.macroItem, backgroundColor: '#ebf8ff' }}>
-                      <span style={styles.macroLabel}>🥑 Chất béo (Fat)</span>
+                      <span style={styles.macroLabel}>🥑 Chất béo</span>
                       <strong style={{ ...styles.macroVal, color: '#3182ce' }}>{nutrition.fat}g</strong>
                     </div>
                   </div>
@@ -403,7 +513,6 @@ export default function RecipeDetailModal({
         </div>
       </div>
 
-      {/* Modal Chia Sẻ QR Code */}
       <ShareRecipeModal
         isOpen={isShareOpen}
         recipe={recipe}
@@ -416,14 +525,9 @@ export default function RecipeDetailModal({
 const styles = {
   overlay: {
     position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 10000,
     padding: '16px',
   },
@@ -442,13 +546,11 @@ const styles = {
   },
   closeBtn: {
     position: 'absolute',
-    top: '16px',
-    right: '16px',
+    top: '16px', right: '16px',
     background: 'rgba(255, 255, 255, 0.9)',
     border: 'none',
     borderRadius: '50%',
-    width: '32px',
-    height: '32px',
+    width: '32px', height: '32px',
     cursor: 'pointer',
     fontWeight: 'bold',
     zIndex: 2,
@@ -465,9 +567,7 @@ const styles = {
   },
   headerInfo: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 0, left: 0, right: 0,
     background: 'linear-gradient(to top, rgba(0,0,0,0.85), transparent)',
     padding: '16px 20px 10px 20px',
     color: '#fff',
@@ -525,7 +625,7 @@ const styles = {
     backgroundColor: '#fffaf0',
     border: '1px solid #feebc8',
     borderRadius: '12px',
-    marginBottom: '12px',
+    marginBottom: '10px',
   },
   servingsControls: {
     display: 'flex',
@@ -533,8 +633,7 @@ const styles = {
     gap: '8px',
   },
   servingsBtn: {
-    width: '28px',
-    height: '28px',
+    width: '28px', height: '28px',
     borderRadius: '8px',
     border: '1px solid #cbd5e0',
     background: '#fff',
@@ -551,7 +650,7 @@ const styles = {
     backgroundColor: '#f8f9fa',
     border: '1px solid #edf2f7',
     borderRadius: '14px',
-    padding: '12px 14px',
+    padding: '10px 12px',
     marginBottom: '12px',
   },
   macroHeader: {
@@ -578,7 +677,7 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '6px 4px',
+    padding: '6px 2px',
     borderRadius: '8px',
   },
   macroLabel: {
@@ -640,14 +739,11 @@ const styles = {
     alignItems: 'flex-start',
   },
   stepBadge: {
-    width: '22px',
-    height: '22px',
+    width: '22px', height: '22px',
     borderRadius: '50%',
     backgroundColor: '#e67e22',
     color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontSize: '0.75rem',
     fontWeight: 'bold',
     flexShrink: 0,
