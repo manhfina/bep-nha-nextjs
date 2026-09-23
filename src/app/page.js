@@ -34,6 +34,9 @@ export default function Home() {
   // Kho nguyên liệu tồn kho tủ lạnh (State dùng chung toàn trang)
   const [fridgeItems, setFridgeItems] = useState([]);
 
+  // Prompt cài đặt PWA
+  const [pwaPrompt, setPwaPrompt] = useState(null);
+
   // Auth, Roles & Family Kitchen state
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState('viewer');
@@ -63,48 +66,48 @@ export default function Home() {
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
 
-  // Nạp tồn kho tủ lạnh từ LocalStorage & Đăng ký Service Worker + Lưu sự kiện cài PWA
+  // Nạp tồn kho tủ lạnh, đăng ký Service Worker & bắt prompt cài đặt PWA
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // 1. Đăng ký Service Worker
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker
-          .register('/sw.js')
-          .catch((err) => console.warn('Lỗi đăng ký Service Worker:', err));
-      }
+    if (typeof window === 'undefined') return;
 
-      // 2. Bắt và lưu lại prompt cài đặt PWA vào window để nút Header có thể gọi
-      const handleBeforeInstall = (e) => {
-        e.preventDefault();
-        window.deferredPrompt = e;
-      };
-      window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-
-      // 3. Nạp tồn kho tủ lạnh
-      try {
-        const savedFridge = localStorage.getItem('bepnha_fridge_items');
-        if (savedFridge) {
-          setFridgeItems(JSON.parse(savedFridge));
-        }
-      } catch (e) {
-        console.error('Lỗi nạp tồn kho tủ lạnh:', e);
-      }
-
-      return () => {
-        window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-      };
+    // 1. Đăng ký Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .catch((err) => console.warn('Lỗi đăng ký Service Worker:', err));
     }
+
+    // 2. Bắt prompt cài đặt PWA an toàn
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setPwaPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
+    // 3. Nạp tồn kho tủ lạnh
+    try {
+      const savedFridge = localStorage.getItem('bepnha_fridge_items');
+      if (savedFridge) {
+        setFridgeItems(JSON.parse(savedFridge));
+      }
+    } catch (e) {
+      console.error('Lỗi nạp tồn kho tủ lạnh:', e);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
   }, []);
 
-  // Hàm xử lý khi người dùng bấm nút Cài App trên Header
+  // Xử lý khi bấm nút Cài App
   const handleInstallApp = () => {
     if (typeof window === 'undefined') return;
 
-    if (window.deferredPrompt) {
-      window.deferredPrompt.prompt();
-      window.deferredPrompt.userChoice.then(({ outcome }) => {
+    if (pwaPrompt) {
+      pwaPrompt.prompt();
+      pwaPrompt.userChoice.then(({ outcome }) => {
         if (outcome === 'accepted') {
-          window.deferredPrompt = null;
+          setPwaPrompt(null);
         }
       });
     } else {
@@ -112,9 +115,9 @@ export default function Home() {
       const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
 
       if (isIosDevice) {
-        alert('📲 Để cài trên iPhone/iPad:\n1. Bấm nút "Chia sẻ" (Share/biểu tượng ô vuông mũi tên lên) ở thanh dưới Safari.\n2. Chọn "Thêm vào MH chính" (Add to Home Screen).');
+        alert('📲 Để cài trên iPhone/iPad:\n1. Bấm nút "Chia sẻ" (Share) ở thanh dưới Safari.\n2. Chọn "Thêm vào MH chính" (Add to Home Screen).');
       } else {
-        alert('💻 Để cài trên Máy tính / Android:\n- Chrome Desktop: Bấm vào biểu tượng Cài đặt ở góc phải thanh địa chỉ web 💻\n- Android: Chọn menu 3 chấm ở góc phải trình duyệt -> "Cài đặt ứng dụng" hoặc "Thêm vào màn hình chính" 📲');
+        alert('💻 Để cài trên Máy tính / Android:\n- Chrome Máy tính: Bấm biểu tượng Cài đặt ở góc phải thanh địa chỉ web 💻\n- Điện thoại Android: Chọn menu 3 chấm -> "Thêm vào màn hình chính" 📲');
       }
     }
   };
@@ -144,7 +147,7 @@ export default function Home() {
     steps: item.steps || item.instructions || [],
   });
 
-  // 1. Tải công thức với cơ chế SWR (Ưu tiên nạp cache 0ms, cập nhật ngầm)
+  // 1. Tải công thức với cơ chế SWR
   const fetchRecipes = async () => {
     const cached = getCachedData(CacheKeys.RECIPES);
     if (cached && Array.isArray(cached) && cached.length > 0) {
