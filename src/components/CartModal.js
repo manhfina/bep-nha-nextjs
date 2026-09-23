@@ -17,7 +17,7 @@ const WEIGHT_PRICES_PER_GRAM = {
   'nấm': 60,         // 60đ/g
   'hành tím': 60,    // 60đ/g
   'cần tây': 50,     // 50đ/g
-  'rau cải': 25,     // 25đ/g (nếu tính theo g)
+  'rau cải': 25,     // 25đ/g
   'cải ngọt': 25,
 };
 
@@ -27,9 +27,10 @@ const UNIT_COUNT_PRICES = {
   'bó': 8000,        // 8.000đ/bó rau
   'cà chua': 3000,   // 3.000đ/quả
   'cà rốt': 4000,    // 4.000đ/củ
+  'hành tây': 5000,  // 5.000đ/củ
   'khoai tây': 5000, // 5.000đ/củ
   'đậu phụ': 4000,   // 4.000đ/bìa
-  'hành lá': 2000,   // 2.000đ/nhánh, lọn
+  'hành lá': 2000,   // 2.000đ/nhánh
   'tỏi': 1500,       // 1.500đ/củ, tép
   'mì': 4000,        // 4.000đ/vắt, gói
   'mắm tôm': 2000,
@@ -51,6 +52,8 @@ const CANONICAL_ALIASES = [
   { key: 'thịt gà', aliases: ['thịt gà', 'ức gà', 'đùi gà', 'cánh gà'] },
   { key: 'cua đồng xay', aliases: ['cua xay', 'cua đồng xay', 'thịt cua đồng', 'cua đồng'] },
   { key: 'trứng gà', aliases: ['trứng gà', 'trứng'] },
+  { key: 'hành tây', aliases: ['hành tây', 'củ hành tây'] },
+  { key: 'cà rốt', aliases: ['cà rốt', 'củ cà rốt'] },
   { key: 'hành tím', aliases: ['hành tím', 'hành khô', 'hành tím băm'] },
   { key: 'tỏi', aliases: ['tỏi', 'tỏi băm', 'tỏi củ'] },
   { key: 'hành lá', aliases: ['hành lá', 'hành hoa', 'hành ngò'] },
@@ -158,11 +161,11 @@ const getSuggestedPack = (unit, qty, name = '') => {
   return `Mua ~${Math.ceil(qty)} ${unit}`;
 };
 
-// Tính đơn giá thông minh theo cả đơn vị tính và tên nguyên liệu
+// Tính đơn giá an toàn, không trả về giá trị rỗng hoặc NaN
 const guessUnitPrice = (cleanKey, unit = '') => {
   const uLower = (unit || '').toLowerCase();
 
-  // 1. Nếu đơn vị tính là gram
+  // 1. Đơn vị tính là gram
   if (uLower === 'g') {
     for (const [key, price] of Object.entries(WEIGHT_PRICES_PER_GRAM)) {
       if (cleanKey.includes(key) || key.includes(cleanKey)) return price;
@@ -170,12 +173,12 @@ const guessUnitPrice = (cleanKey, unit = '') => {
     return 150;
   }
 
-  // 2. Nếu đơn vị tính là bó rau
+  // 2. Đơn vị tính là bó
   if (uLower.includes('bó')) {
     return 8000;
   }
 
-  // 3. Nếu đơn vị tính là đơn vị đếm
+  // 3. Đơn vị đếm (củ, quả, miếng, tép...)
   for (const [key, price] of Object.entries(UNIT_COUNT_PRICES)) {
     if (cleanKey.includes(key) || key.includes(cleanKey)) return price;
   }
@@ -200,7 +203,17 @@ export default function CartModal({
   useEffect(() => {
     try {
       const savedPrices = localStorage.getItem('bepnha_unit_prices');
-      if (savedPrices) setCustomUnitPrices(JSON.parse(savedPrices));
+      if (savedPrices) {
+        const parsed = JSON.parse(savedPrices);
+        // Lọc bỏ toàn bộ giá trị rác hoặc NaN từng bị lưu trước đó
+        const cleanSaved = {};
+        Object.entries(parsed).forEach(([k, v]) => {
+          if (Number.isFinite(Number(v)) && Number(v) > 0) {
+            cleanSaved[k] = Number(v);
+          }
+        });
+        setCustomUnitPrices(cleanSaved);
+      }
 
       const savedFridge = localStorage.getItem('bepnha_fridge_items');
       if (savedFridge) setFridgeItems(JSON.parse(savedFridge));
@@ -212,8 +225,9 @@ export default function CartModal({
   if (!isOpen) return null;
 
   const handleUnitPriceChange = (key, val) => {
-    const numeric = parseInt(val, 10) || 0;
-    const updated = { ...customUnitPrices, [key]: numeric };
+    const numeric = parseInt(val, 10);
+    const validPrice = Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
+    const updated = { ...customUnitPrices, [key]: validPrice };
     setCustomUnitPrices(updated);
     try {
       localStorage.setItem('bepnha_unit_prices', JSON.stringify(updated));
@@ -224,10 +238,18 @@ export default function CartModal({
 
   const getUnitPrice = (key, unit = '') => {
     const storageKey = `${key}__${unit}`;
-    if (customUnitPrices[storageKey] !== undefined) return customUnitPrices[storageKey];
-    if (customUnitPrices[key] !== undefined) return customUnitPrices[key];
-    if (priceMap && priceMap[key] !== undefined) return priceMap[key];
-    return guessUnitPrice(key, unit);
+    const custom = customUnitPrices[storageKey] ?? customUnitPrices[key];
+    if (Number.isFinite(Number(custom)) && Number(custom) > 0) {
+      return Number(custom);
+    }
+
+    const dynamicPrice = priceMap?.[key];
+    if (Number.isFinite(Number(dynamicPrice)) && Number(dynamicPrice) > 0) {
+      return Number(dynamicPrice);
+    }
+
+    const guessed = guessUnitPrice(key, unit);
+    return Number.isFinite(Number(guessed)) ? Number(guessed) : 5000;
   };
 
   const isItemInFridge = (cleanKey, rawName) => {
@@ -271,21 +293,23 @@ export default function CartModal({
 
   const mergedItems = Object.values(mergedList);
 
-  // Tính tổng chi phí
+  // Tính tổng chi phí (đảm bảo không bị NaN)
   const totalCost = (viewMode === 'merged' ? mergedItems : shoppingList).reduce((sum, item) => {
     if (viewMode === 'merged') {
       if (deductFridge && item.inFridge) return sum;
       const uPrice = getUnitPrice(item.key, item.unit);
-      return sum + Math.round(item.totalQuantity * uPrice);
+      const sub = Math.round((item.totalQuantity || 0) * uPrice);
+      return sum + (Number.isFinite(sub) ? sub : 0);
     } else {
       const parsed = parseIngredient(item.text);
       if (deductFridge && isItemInFridge(parsed.cleanKey, parsed.name)) return sum;
       const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
-      return sum + Math.round(parsed.quantity * uPrice);
+      const sub = Math.round((parsed.quantity || 0) * uPrice);
+      return sum + (Number.isFinite(sub) ? sub : 0);
     }
   }, 0);
 
-  // 1. Tối ưu chia sẻ Zalo trực tiếp & mở Zalo Web
+  // Chia sẻ Zalo
   const handleShareZalo = async () => {
     if (shoppingList.length === 0) return;
 
@@ -299,7 +323,7 @@ export default function CartModal({
       textToSend += '👉 NGUYÊN LIỆU CẦN MUA NGOÀI CHỢ:\n';
       neededItems.forEach((item, index) => {
         const uPrice = getUnitPrice(item.key, item.unit);
-        const itemTotal = Math.round(item.totalQuantity * uPrice);
+        const itemTotal = Math.round((item.totalQuantity || 0) * uPrice);
         const doneTag = item.isDone ? ' [Đã mua] ✅' : '';
         textToSend += `${index + 1}. ${item.name}: ${item.totalQuantity} ${item.unit} [👉 ${item.suggested}] (~${itemTotal.toLocaleString('vi-VN')}đ)${doneTag}\n`;
         textToSend += `   🍲 Cho món: ${item.dishes.join(', ')}\n`;
@@ -316,7 +340,7 @@ export default function CartModal({
         const parsed = parseIngredient(item.text);
         const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
         const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
-        const itemTotal = Math.round(parsed.quantity * uPrice);
+        const itemTotal = Math.round((parsed.quantity || 0) * uPrice);
         const doneTag = item.is_done ? ' [Đã mua] ✅' : '';
         textToSend += `${index + 1}. ${item.text} ${inF ? '[Có sẵn trong tủ]' : `(~${itemTotal.toLocaleString('vi-VN')}đ)`}${doneTag} [${item.dish}]\n`;
       });
@@ -327,7 +351,6 @@ export default function CartModal({
     textToSend += '📲 Xem và tick giỏ hàng Realtime tại: https://bep-nha-nextjs.vercel.app\n';
     textToSend += '(Ai đi chợ tick mua món nào, app ở nhà sẽ tự gạch ngang tức thì!)';
 
-    // Thử chia sẻ qua Web Share API (Android/iOS bung danh sách Zalo)
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
@@ -336,11 +359,10 @@ export default function CartModal({
         });
         return;
       } catch (err) {
-        // Nếu người dùng hủy thì chuyển sang clipboard
+        // Tiếp tục phương án clipboard
       }
     }
 
-    // Fallback trên máy tính: Copy clipboard và hỏi mở Zalo Web
     navigator.clipboard
       .writeText(textToSend)
       .then(() => {
@@ -354,7 +376,7 @@ export default function CartModal({
       .catch((err) => alert('Lỗi sao chép: ' + err.message));
   };
 
-  // 2. Xuất Excel
+  // Xuất Excel
   const handleExportExcel = () => {
     if (shoppingList.length === 0) return;
 
@@ -370,7 +392,7 @@ export default function CartModal({
           'Cần dùng': `${item.totalQuantity} ${item.unit}`,
           'Gợi ý mua ngoài chợ': inF ? 'Đã có trong tủ lạnh' : item.suggested,
           'Đơn giá (VNĐ)': inF ? 0 : uPrice,
-          'Thành tiền (VNĐ)': inF ? 0 : Math.round(item.totalQuantity * uPrice),
+          'Thành tiền (VNĐ)': inF ? 0 : Math.round((item.totalQuantity || 0) * uPrice),
           'Món ăn áp dụng': item.dishes.join(', '),
         };
       });
@@ -387,7 +409,7 @@ export default function CartModal({
           'Cần dùng': `${parsed.quantity} ${parsed.unit}`,
           'Gợi ý mua ngoài chợ': inF ? 'Đã có trong tủ lạnh' : getSuggestedPack(parsed.unit, parsed.quantity, parsed.name),
           'Đơn giá (VNĐ)': inF ? 0 : uPrice,
-          'Thành tiền (VNĐ)': inF ? 0 : Math.round(parsed.quantity * uPrice),
+          'Thành tiền (VNĐ)': inF ? 0 : Math.round((parsed.quantity || 0) * uPrice),
         };
       });
     }
@@ -412,7 +434,7 @@ export default function CartModal({
     XLSX.writeFile(workbook, `Chi_Phi_Di_Cho_${dateStr}.xlsx`);
   };
 
-  // 3. In danh sách / Lưu PDF
+  // In danh sách
   const handlePrint = () => {
     if (shoppingList.length === 0) return;
 
@@ -422,7 +444,7 @@ export default function CartModal({
         if (viewMode === 'merged') {
           const inF = deductFridge && item.inFridge;
           const uPrice = getUnitPrice(item.key, item.unit);
-          const itemTotal = inF ? 0 : Math.round(item.totalQuantity * uPrice);
+          const itemTotal = inF ? 0 : Math.round((item.totalQuantity || 0) * uPrice);
           return `
             <tr style="background-color: ${item.isDone ? '#f0fff4' : 'transparent'};">
               <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
@@ -442,7 +464,7 @@ export default function CartModal({
         const parsed = parseIngredient(item.text);
         const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
         const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
-        const itemTotal = inF ? 0 : Math.round(parsed.quantity * uPrice);
+        const itemTotal = inF ? 0 : Math.round((parsed.quantity || 0) * uPrice);
         return `
           <tr style="background-color: ${item.is_done ? '#f0fff4' : 'transparent'};">
             <td style="text-align:center; padding: 8px; border: 1px solid #ddd;">${idx + 1}</td>
@@ -557,7 +579,6 @@ export default function CartModal({
               </button>
             </div>
 
-            {/* Switch trừ tồn kho tủ lạnh */}
             <div
               onClick={() => setDeductFridge(!deductFridge)}
               style={{
@@ -599,7 +620,7 @@ export default function CartModal({
               ? mergedItems.map((item) => {
                   const inFridge = deductFridge && item.inFridge;
                   const uPrice = getUnitPrice(item.key, item.unit);
-                  const itemTotal = inFridge ? 0 : Math.round(item.totalQuantity * uPrice);
+                  const itemTotal = inFridge ? 0 : Math.round((item.totalQuantity || 0) * uPrice);
 
                   return (
                     <div
@@ -670,7 +691,7 @@ export default function CartModal({
                               <span style={{ fontSize: '0.7rem', color: '#718096' }}>đ/{item.unit}</span>
                             </div>
                             <span style={cartStyles.totalItemPrice}>
-                              ~{itemTotal.toLocaleString('vi-VN')} đ
+                              ~{(Number.isFinite(itemTotal) ? itemTotal : 0).toLocaleString('vi-VN')} đ
                             </span>
                           </>
                         )}
@@ -682,7 +703,7 @@ export default function CartModal({
                   const parsed = parseIngredient(item.text);
                   const inFridge = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
                   const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
-                  const itemTotal = inFridge ? 0 : Math.round(parsed.quantity * uPrice);
+                  const itemTotal = inFridge ? 0 : Math.round((parsed.quantity || 0) * uPrice);
 
                   return (
                     <div
@@ -727,7 +748,7 @@ export default function CartModal({
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span style={cartStyles.totalItemPrice}>
-                          {inFridge ? '0 đ' : `~${itemTotal.toLocaleString('vi-VN')} đ`}
+                          {inFridge ? '0 đ' : `~${(Number.isFinite(itemTotal) ? itemTotal : 0).toLocaleString('vi-VN')} đ`}
                         </span>
                         {!inFridge && (
                           <span style={{ fontSize: '0.68rem', color: '#a0aec0' }}>
@@ -752,7 +773,7 @@ export default function CartModal({
           </div>
         )}
 
-        {/* Tổng kết chi phí & Các nút hành động */}
+        {/* Footer Tổng kết */}
         {shoppingList.length > 0 && (
           <div style={cartStyles.footer}>
             <div style={cartStyles.totalBox}>
@@ -767,11 +788,10 @@ export default function CartModal({
                 )}
               </div>
               <span style={{ fontSize: '1.3rem', color: '#e67e22', fontWeight: '800' }}>
-                ~{totalCost.toLocaleString('vi-VN')} <span style={{ fontSize: '0.85rem' }}>VNĐ</span>
+                ~{(Number.isFinite(totalCost) ? totalCost : 0).toLocaleString('vi-VN')} <span style={{ fontSize: '0.85rem' }}>VNĐ</span>
               </span>
             </div>
 
-            {/* Nút gửi Zalo chuyên biệt */}
             <button onClick={handleShareZalo} style={cartStyles.btnZalo}>
               💬 Chia sẻ qua Zalo & Nhóm Gia Đình (Realtime)
             </button>
