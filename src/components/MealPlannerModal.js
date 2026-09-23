@@ -33,6 +33,7 @@ export default function MealPlannerModal({
       const queryStr = params.toString() ? `?${params.toString()}` : '';
 
       const res = await fetch(`/api/meal-plans${queryStr}`);
+      if (!res.ok) throw new Error('Không thể tải dữ liệu lịch tuần');
       const data = await res.json();
 
       if (Array.isArray(data)) {
@@ -93,7 +94,10 @@ export default function MealPlannerModal({
         }),
       });
 
-      if (!res.ok) throw new Error('Không thể thêm món');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Không thể thêm món');
+      }
 
       setPlanner((prev) => ({
         ...prev,
@@ -148,7 +152,7 @@ export default function MealPlannerModal({
     }
   };
 
-  // Gọi Gemini AI để lập thực đơn thông minh
+  // Gọi Gemini AI để lập thực đơn thông minh với cơ chế kiểm tra an toàn
   const handleGenerateAiPlan = async (customPrompt) => {
     const promptToSend = customPrompt || aiPrompt;
     if (!promptToSend.trim()) {
@@ -173,18 +177,27 @@ export default function MealPlannerModal({
         }),
       });
 
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(
+          'Không tìm thấy API Route (/api/ai/meal-plan). Hãy chắc chắn file đã được commit lên đúng thư mục src/app/api/ai/meal-plan/route.js.'
+        );
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Lỗi khi tạo thực đơn AI');
+      if (!res.ok) {
+        throw new Error(data.error || 'Lỗi khi gọi trợ lý AI');
+      }
 
       setAiSuggestion(data);
     } catch (err) {
-      alert('Lỗi AI: ' + err.message);
+      alert(err.message);
     } finally {
       setAiLoading(false);
     }
   };
 
-  // Áp dụng thực đơn AI gợi ý vào tuần hiện tại bằng Bulk Insert
+  // Áp dụng thực đơn AI gợi ý vào tuần hiện tại
   const handleApplyAiPlan = async () => {
     if (!aiSuggestion?.plan) return;
     if (!confirm('Hành động này sẽ cập nhật thực đơn tuần theo gợi ý của AI. Bạn có muốn tiếp tục?')) return;
@@ -197,7 +210,7 @@ export default function MealPlannerModal({
       else if (currentUserId) params.set('userId', currentUserId);
       await fetch(`/api/meal-plans?${params.toString()}`, { method: 'DELETE' });
 
-      // 2. Chuẩn bị mảng bản ghi để chèn hàng loạt (Bulk Insert)
+      // 2. Gom danh sách cần chèn hàng loạt
       const itemsToInsert = [];
       const newPlanner = {};
 
@@ -221,7 +234,7 @@ export default function MealPlannerModal({
         });
       });
 
-      // 3. Gửi 1 request Bulk Insert duy nhất
+      // 3. Gửi Bulk Insert
       if (itemsToInsert.length > 0) {
         const bulkRes = await fetch('/api/meal-plans', {
           method: 'POST',

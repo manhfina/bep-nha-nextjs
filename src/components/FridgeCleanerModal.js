@@ -9,7 +9,7 @@ const COMMON_INGREDIENTS = [
   'Cà rốt', 'Khoai tây', 'Nấm', 'Ớt'
 ];
 
-// Danh sách gia vị cơ bản thường có sẵn trong bếp (không phạt điểm nếu thiếu)
+// Gia vị cơ bản không phạt điểm
 const STAPLE_PANTRY = [
   'muối', 'đường', 'tiêu', 'hạt tiêu', 'nước mắm', 'mắm', 'hạt nêm',
   'bột ngọt', 'mì chính', 'dầu ăn', 'mỡ', 'nước tương', 'xì dầu',
@@ -25,28 +25,39 @@ export default function FridgeCleanerModal({
   isOpen,
   onClose,
   recipes = [],
+  fridgeItems = [],            // Nhận kho đồ từ trang chủ truyền vào
+  onUpdateFridge,              // Nhận hàm cập nhật từ trang chủ
   onOpenDetail,
   onAddMissingToCart
 }) {
-  const [selectedIngredients, setSelectedIngredients] = useState([]);
+  // Dự phòng nếu trang chủ chưa truyền props thì dùng state nội bộ + localStorage
+  const [internalItems, setInternalItems] = useState([]);
   const [customInput, setCustomInput] = useState('');
   const [isAiScannerOpen, setIsAiScannerOpen] = useState(false);
 
-  // Tự động nạp danh sách đồ tủ lạnh đã lưu từ trước
   useEffect(() => {
     try {
       const saved = localStorage.getItem('bepnha_fridge_items');
       if (saved) {
-        setSelectedIngredients(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        setInternalItems(parsed);
+        if (onUpdateFridge && (!fridgeItems || fridgeItems.length === 0)) {
+          onUpdateFridge(parsed);
+        }
       }
     } catch (e) {
       console.error(e);
     }
   }, []);
 
-  // Lưu tủ lạnh vào LocalStorage khi có thay đổi
-  const updateFridge = (newItems) => {
-    setSelectedIngredients(newItems);
+  // Danh sách đang dùng: ưu tiên lấy từ props trang chủ
+  const currentFridge = (onUpdateFridge && Array.isArray(fridgeItems)) ? fridgeItems : internalItems;
+
+  const handleSaveFridge = (newItems) => {
+    if (onUpdateFridge) {
+      onUpdateFridge(newItems);
+    }
+    setInternalItems(newItems);
     try {
       localStorage.setItem('bepnha_fridge_items', JSON.stringify(newItems));
     } catch (e) {
@@ -59,35 +70,34 @@ export default function FridgeCleanerModal({
   // Thêm/bớt nguyên liệu chọn nhanh
   const toggleIngredient = (name) => {
     const lower = name.toLowerCase().trim();
-    const updated = selectedIngredients.includes(lower)
-      ? selectedIngredients.filter((i) => i !== lower)
-      : [...selectedIngredients, lower];
-    updateFridge(updated);
+    const updated = currentFridge.includes(lower)
+      ? currentFridge.filter((i) => i !== lower)
+      : [...currentFridge, lower];
+    handleSaveFridge(updated);
   };
 
   // Thêm nguyên liệu tự gõ
   const handleAddCustom = (e) => {
     e.preventDefault();
     const val = customInput.trim().toLowerCase();
-    if (val && !selectedIngredients.includes(val)) {
-      updateFridge([...selectedIngredients, val]);
+    if (val && !currentFridge.includes(val)) {
+      handleSaveFridge([...currentFridge, val]);
       setCustomInput('');
     }
   };
 
   // Xóa toàn bộ tủ lạnh
   const handleClearAll = () => {
-    updateFridge([]);
+    handleSaveFridge([]);
   };
 
-  // Logic phân tích và xếp hạng món ăn thông minh (đã lọc gia vị nền)
+  // Phân tích và xếp hạng món ăn
   const analyzedRecipes = recipes.map((recipe) => {
     const ingredients = recipe.ingredients || [];
     let matchCount = 0;
     const missingItems = [];
     const availableItems = [];
 
-    // Tách riêng nguyên liệu chính và gia vị nêm nếm
     const mainIngredients = ingredients.filter(ing => {
       const ingName = (typeof ing === 'string' ? ing : ing.name || '');
       return !isStapleSeasoning(ingName);
@@ -97,7 +107,7 @@ export default function FridgeCleanerModal({
 
     targetList.forEach((ing) => {
       const ingName = (typeof ing === 'string' ? ing : ing.name || '').toLowerCase();
-      const isMatched = selectedIngredients.some((selected) => 
+      const isMatched = currentFridge.some((selected) => 
         ingName.includes(selected) || selected.includes(ingName)
       );
 
@@ -125,7 +135,6 @@ export default function FridgeCleanerModal({
       canCookNow: missingItems.length === 0 && matchCount > 0,
     };
   })
-  // Chỉ lấy những món có ít nhất 1 nguyên liệu trùng khớp và sắp xếp theo độ phù hợp
   .filter((r) => r.matchCount > 0)
   .sort((a, b) => {
     if (b.matchPercentage !== a.matchPercentage) {
@@ -147,7 +156,7 @@ export default function FridgeCleanerModal({
             </p>
           </div>
 
-          {/* Nút kích hoạt AI Vision Scanner */}
+          {/* Nút AI Scanner */}
           <div style={{ marginBottom: '12px' }}>
             <button
               type="button"
@@ -158,10 +167,10 @@ export default function FridgeCleanerModal({
             </button>
           </div>
 
-          {/* Danh sách chọn nhanh nguyên liệu */}
+          {/* Chọn nhanh */}
           <div style={styles.tagsContainer}>
             {COMMON_INGREDIENTS.map((item) => {
-              const isSelected = selectedIngredients.includes(item.toLowerCase());
+              const isSelected = currentFridge.includes(item.toLowerCase());
               return (
                 <button
                   key={item}
@@ -180,7 +189,7 @@ export default function FridgeCleanerModal({
             })}
           </div>
 
-          {/* Ô nhập nguyên liệu khác */}
+          {/* Ô nhập */}
           <form onSubmit={handleAddCustom} style={styles.customForm}>
             <input
               type="text"
@@ -192,34 +201,43 @@ export default function FridgeCleanerModal({
             <button type="submit" style={styles.btnAddCustom}>Thêm</button>
           </form>
 
-          {/* Đã chọn */}
-          {selectedIngredients.length > 0 && (
-            <div style={styles.selectedBox}>
-              <span style={{ fontSize: '0.8rem', color: '#555', fontWeight: 'bold' }}>Tủ lạnh đang có:</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
-                {selectedIngredients.map((ing) => (
+          {/* Tồn kho tủ lạnh hiện tại */}
+          <div style={styles.selectedBox}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.82rem', color: '#2d3436', fontWeight: 'bold' }}>
+                🧊 Tồn kho tủ lạnh đang có ({currentFridge.length}):
+              </span>
+              {currentFridge.length > 0 && (
+                <button
+                  onClick={handleClearAll}
+                  style={{ background: 'none', border: 'none', color: '#e74c3c', fontSize: '0.75rem', cursor: 'pointer', fontWeight: '600' }}
+                >
+                  Xóa tất cả
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+              {currentFridge.length === 0 ? (
+                <span style={{ fontSize: '0.8rem', color: '#888' }}>Tủ lạnh đang trống, hãy chọn nguyên liệu ở trên.</span>
+              ) : (
+                currentFridge.map((ing) => (
                   <span key={ing} style={styles.badgeItem}>
                     {ing}
                     <button onClick={() => toggleIngredient(ing)} style={styles.badgeRemove}>✕</button>
                   </span>
-                ))}
-                <button
-                  onClick={handleClearAll}
-                  style={{ background: 'none', border: 'none', color: '#e74c3c', fontSize: '0.75rem', cursor: 'pointer', marginLeft: '6px' }}
-                >
-                  Xóa hết
-                </button>
-              </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
 
-          {/* Kết quả món gợi ý */}
+          {/* Danh sách món gợi ý */}
           <div style={styles.resultSection}>
             <h4 style={{ margin: '0 0 10px 0', fontSize: '0.95rem', color: '#2d3436' }}>
               Món gợi ý ({analyzedRecipes.length})
             </h4>
 
-            {selectedIngredients.length === 0 ? (
+            {currentFridge.length === 0 ? (
               <p style={styles.emptyText}>Hãy bấm chọn hoặc dùng AI quét nguyên liệu ở trên để xem gợi ý.</p>
             ) : analyzedRecipes.length === 0 ? (
               <p style={styles.emptyText}>Chưa có món nào trong sổ tay dùng các nguyên liệu này.</p>
@@ -284,14 +302,13 @@ export default function FridgeCleanerModal({
         </div>
       </div>
 
-      {/* Modal Quét ảnh AI Vision */}
       <AiScannerModal
         isOpen={isAiScannerOpen}
         onClose={() => setIsAiScannerOpen(false)}
         onApplyItems={(items) => {
           const newNames = items.map((i) => i.name.toLowerCase().trim());
-          const merged = Array.from(new Set([...selectedIngredients, ...newNames]));
-          updateFridge(merged);
+          const merged = Array.from(new Set([...currentFridge, ...newNames]));
+          handleSaveFridge(merged);
         }}
       />
     </>
@@ -392,28 +409,29 @@ const styles = {
   },
   selectedBox: {
     backgroundColor: '#f8f9fa',
-    padding: '8px 12px',
-    borderRadius: '10px',
+    padding: '10px 14px',
+    borderRadius: '12px',
     marginBottom: '12px',
     textAlign: 'left',
+    border: '1px solid #edf2f7',
   },
   badgeItem: {
     backgroundColor: '#e1f5fe',
     color: '#0288d1',
-    padding: '2px 8px',
+    padding: '3px 9px',
     borderRadius: '6px',
-    fontSize: '0.75rem',
+    fontSize: '0.78rem',
     fontWeight: '600',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '4px',
+    gap: '5px',
   },
   badgeRemove: {
     background: 'none',
     border: 'none',
     color: '#0288d1',
     cursor: 'pointer',
-    fontSize: '0.75rem',
+    fontSize: '0.8rem',
     padding: 0,
   },
   resultSection: {

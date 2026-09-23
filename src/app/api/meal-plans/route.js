@@ -1,126 +1,105 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
 
-// GET: Lấy danh sách món đã lên lịch theo Bếp hoặc theo User
-export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const kitchenId = searchParams.get('kitchenId');
-  const userId = searchParams.get('userId');
+export const dynamic = 'force-dynamic';
 
-  let query = supabase.from('meal_plans').select('*');
-
-  if (kitchenId) {
-    query = query.eq('kitchen_id', kitchenId);
-  } else if (userId) {
-    query = query.eq('user_id', userId).is('kitchen_id', null);
-  } else {
-    query = query.is('user_id', null).is('kitchen_id', null);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json(data);
-}
-
-// POST: Thêm một món HOẶC thêm hàng loạt món vào bữa ăn
-export async function POST(request) {
+export async function POST(req) {
   try {
-    const body = await request.json();
+    const body = await req.json().catch(() => ({}));
+    const { prompt = '', recipes = [], fridgeItems = [] } = body;
 
-    // Trường hợp 1: Chèn hàng loạt (Bulk insert từ AI Meal Planner)
-    if (Array.isArray(body.items)) {
-      if (body.items.length === 0) {
-        return NextResponse.json([]);
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'Chưa cấu hình GEMINI_API_KEY trên Environment Variables của Vercel.' },
+        { status: 500 }
+      );
+    }
+
+    if (!Array.isArray(recipes) || recipes.length === 0) {
+      return NextResponse.json(
+        { error: 'Không tìm thấy danh sách món ăn để lập thực đơn.' },
+        { status: 400 }
+      );
+    }
+
+    // Lọc danh sách món ngắn gọn đưa vào AI
+    const dishList = recipes.slice(0, 40).map((r) => ({
+      id: String(r.id),
+      title: r.title,
+    }));
+
+    const systemInstruction = `Bạn là Trợ lý AI Bếp Nhà Copilot. Nhiệm vụ của bạn là lập thực đơn tuần 7 ngày (từ "Thứ 2" đến "Chủ Nhật") cho gia đình.
+Danh sách món ăn hiện có: ${JSON.stringify(dishList)}
+Tồn kho tủ lạnh hiện có: ${JSON.stringify(fridgeItems)}
+Yêu cầu của người dùng: "${prompt || 'Lên thực đơn cân đối, đa dạng món thịt, cá, rau'}"
+
+QUY TẮC:
+1. BẮT BUỘC chỉ chọn các món ăn từ danh sách được cung cấp ở trên và lấy đúng id của món đó.
+2. Mỗi ngày có 2 bữa: "lunch" (1-2 id món) và "dinner" (1-2 id món).
+3. Đảm bảo đủ 7 ngày gồm: "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật".
+4. Phải trả về DUY NHẤT một chuỗi JSON hợp lệ theo cấu trúc:
+{
+  "summary": "Tóm tắt ngắn gọn thực đơn 1-2 câu",
+  "plan": [
+    { "day": "Thứ 2", "lunch": ["id1"], "dinner": ["id2"] },
+    ...
+    { "day": "Chủ Nhật", "lunch": ["id3"], "dinner": ["id4"] }
+  ]
+}`;
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: systemInstruction }] }],
+          generationConfig: {
+            temperature: 0.3,
+            responseMimeType: 'application/json',
+          },
+        }),
       }
+    );
 
-      const rowsToInsert = body.items.map((item) => ({
-        day: item.day,
-        meal_type: item.mealType || item.meal_type,
-        recipe_id: item.recipeId || item.recipe_id,
-        user_id: item.userId || body.userId || null,
-        kitchen_id: item.kitchenId || body.kitchenId || null,
-      }));
-
-      const { data, error } = await supabase
-        .from('meal_plans')
-        .insert(rowsToInsert)
-        .select();
-
-      if (error) throw error;
-      return NextResponse.json(data);
+    if (!res.ok) {
+      const errDetail = await res.text();
+      console.error('Gemini API Error:', errDetail);
+      return NextResponse.json(
+        { error: 'Lỗi từ Gemini API: ' + (res.statusText || res.status) },
+        { status: 500 }
+      );
     }
 
-    // Trường hợp 2: Chèn 1 món lẻ (Chọn tay thủ công như cũ)
-    const { day, mealType, recipeId, userId, kitchenId } = body;
+    const aiRes = await res.json();
+    const rawText = aiRes.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
-    if (!day || !mealType || !recipeId) {
-      return NextResponse.json({ error: 'Thiếu dữ liệu' }, { status: 400 });
+    let parsedResult;
+    try {
+      const cleaned = rawText.replace(/```json|```/gi, '').trim();
+      parsedResult = JSON.parse(cleaned);
+    } catch (e) {
+      parsedResult = {
+        summary: 'Thực đơn tuần được tối ưu từ các món ngon của bếp.',
+        plan: [
+          'Thứ 2',
+          'Thứ 3',
+          'Thứ 4',
+          'Thứ 5',
+          'Thứ 6',
+          'Thứ 7',
+          'Chủ Nhật',
+        ].map((day, idx) => ({
+          day,
+          lunch: [dishList[idx % dishList.length].id],
+          dinner: [dishList[(idx + 1) % dishList.length].id],
+        })),
+      };
     }
 
-    const insertData = {
-      day,
-      meal_type: mealType,
-      recipe_id: recipeId,
-      user_id: userId || null,
-      kitchen_id: kitchenId || null,
-    };
-
-    const { data, error } = await supabase
-      .from('meal_plans')
-      .insert([insertData])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    return NextResponse.json(data);
+    return NextResponse.json(parsedResult);
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
-
-// DELETE: Xóa món khỏi lịch hoặc dọn toàn bộ lịch tuần
-export async function DELETE(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const day = searchParams.get('day');
-    const mealType = searchParams.get('mealType');
-    const recipeId = searchParams.get('recipeId');
-    const kitchenId = searchParams.get('kitchenId');
-    const userId = searchParams.get('userId');
-
-    let query = supabase.from('meal_plans').delete();
-
-    if (id) {
-      query = query.eq('id', id);
-    } else if (day && mealType && recipeId) {
-      query = query.eq('day', day).eq('meal_type', mealType).eq('recipe_id', recipeId);
-      if (kitchenId) {
-        query = query.eq('kitchen_id', kitchenId);
-      } else if (userId) {
-        query = query.eq('user_id', userId);
-      }
-    } else {
-      // Xóa sạch cả tuần
-      if (kitchenId) {
-        query = query.eq('kitchen_id', kitchenId);
-      } else if (userId) {
-        query = query.eq('user_id', userId);
-      } else {
-        query = query.is('user_id', null);
-      }
-    }
-
-    const { error } = await query;
-    if (error) throw error;
-
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('Lỗi API AI:', err);
+    return NextResponse.json({ error: err.message || 'Lỗi server' }, { status: 500 });
   }
 }
