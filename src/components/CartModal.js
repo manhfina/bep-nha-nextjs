@@ -2,38 +2,49 @@
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 
-// Đơn giá tham khảo mặc định trên 1 đơn vị tính (VNĐ)
-const DEFAULT_UNIT_PRICES = {
-  'trứng': 3500,     // 3.500đ / quả
-  'thịt bò': 280,    // 280đ / gram (28.000đ / lạng)
-  'thịt heo': 140,   // 140đ / gram (14.000đ / lạng)
+// 1. Đơn giá chuẩn tính theo GRAM (đ/g)
+const WEIGHT_PRICES_PER_GRAM = {
+  'tôm': 300,        // 300đ/g = 30.000đ/lạng = 300.000đ/kg
+  'mực': 280,        // 280đ/g = 28.000đ/lạng = 280.000đ/kg
+  'thịt bò': 280,    // 280đ/g = 28.000đ/lạng
+  'thịt heo': 140,   // 140đ/g = 14.000đ/lạng
   'thịt lợn': 140,
-  'thịt xay': 140,   // 140đ / gram
-  'cua đồng': 180,   // 180đ / gram
-  'thịt gà': 90,     // 90đ / gram
-  'cà chua': 3000,   // 3.000đ / quả hoặc củ
-  'rau cải': 22,     // 22đ / gram (~8.000đ/bó)
-  'cải ngọt': 22,
-  'cần tây': 50,     // 50đ / gram
-  'hành lá': 2000,   // 2.000đ / nhánh, cây
-  'hành tím': 60,    // 60đ / gram
-  'tỏi': 1500,       // 1.500đ / tép
-  'đậu phụ': 4000,   // 4.000đ / bìa, miếng
-  'cà rốt': 4000,    // 4.000đ / củ
-  'khoai tây': 5000, // 5.000đ / củ
-  'nấm': 60,         // 60đ / gram
-  'mì': 3500,        // 3.500đ / vắt, gói
-  'mắm tôm': 1000,
-  'dầu ăn': 1000,
-  'nước mắm': 1000,
-  'dầu hào': 1000,
-  'tiêu': 500,
-  'ớt': 500,
-  'gia vị': 500,
+  'thịt xay': 140,
+  'ba chỉ': 150,
+  'thịt gà': 90,     // 90đ/g = 9.000đ/lạng
+  'cá': 120,         // 120đ/g
+  'cua đồng': 180,   // 180đ/g
+  'nấm': 60,         // 60đ/g
+  'hành tím': 60,    // 60đ/g
+  'cần tây': 50,     // 50đ/g
+  'rau cải': 25,     // 25đ/g (nếu tính theo g)
+  'cải ngọt': 25,
 };
 
-// Nhóm từ đồng nghĩa để gom chung 1 nguyên liệu
+// 2. Đơn giá chuẩn tính theo ĐƠN VỊ ĐẾM (đ/quả, đ/bó, đ/củ, đ/gói...)
+const UNIT_COUNT_PRICES = {
+  'trứng': 3500,     // 3.500đ/quả
+  'bó': 8000,        // 8.000đ/bó rau
+  'cà chua': 3000,   // 3.000đ/quả
+  'cà rốt': 4000,    // 4.000đ/củ
+  'khoai tây': 5000, // 5.000đ/củ
+  'đậu phụ': 4000,   // 4.000đ/bìa
+  'hành lá': 2000,   // 2.000đ/nhánh, lọn
+  'tỏi': 1500,       // 1.500đ/củ, tép
+  'mì': 4000,        // 4.000đ/vắt, gói
+  'mắm tôm': 2000,
+  'dầu ăn': 1500,
+  'nước mắm': 1500,
+  'dầu hào': 1500,
+  'tiêu': 500,
+  'ớt': 500,
+  'gia vị': 1000,
+};
+
+// Nhóm từ đồng nghĩa gom nguyên liệu
 const CANONICAL_ALIASES = [
+  { key: 'tôm tươi', aliases: ['tôm', 'tôm tươi', 'tôm sú', 'tôm rảo'] },
+  { key: 'mực ống', aliases: ['mực', 'mực ống', 'mực lá', 'mực tươi'] },
   { key: 'thịt heo xay', aliases: ['thịt xay', 'thịt heo xay', 'thịt lợn xay', 'thịt băm'] },
   { key: 'thịt ba chỉ', aliases: ['ba chỉ', 'thịt ba chỉ', 'thịt ba rọi'] },
   { key: 'thịt bò', aliases: ['thịt bò', 'bắp bò', 'nạm bò', 'thăn bò'] },
@@ -44,7 +55,8 @@ const CANONICAL_ALIASES = [
   { key: 'tỏi', aliases: ['tỏi', 'tỏi băm', 'tỏi củ'] },
   { key: 'hành lá', aliases: ['hành lá', 'hành hoa', 'hành ngò'] },
   { key: 'đậu phụ', aliases: ['đậu phụ', 'đậu hũ', 'tàu hũ'] },
-  { key: 'rau cải ngọt', aliases: ['rau cải ngọt', 'cải ngọt', 'rau cải'] },
+  { key: 'cải ngọt', aliases: ['rau cải ngọt', 'cải ngọt', 'rau cải'] },
+  { key: 'mì', aliases: ['mì', 'mì gói', 'vắt mì', 'mì tôm'] },
   { key: 'gia vị thông dụng', aliases: ['gia vị', 'nêm nếm', 'muối, đường', 'bột ngọt'] },
 ];
 
@@ -82,7 +94,7 @@ const parseIngredient = (rawText = '') => {
     }
   }
 
-  // Chuẩn hóa đơn vị khối lượng về gram (g)
+  // Chuẩn hóa khối lượng về gram (g)
   let normalizedQty = Math.max(0.1, quantity);
   let normalizedUnit = unit || 'phần';
   const uLower = normalizedUnit.toLowerCase();
@@ -146,11 +158,29 @@ const getSuggestedPack = (unit, qty, name = '') => {
   return `Mua ~${Math.ceil(qty)} ${unit}`;
 };
 
-const guessUnitPrice = (cleanKey) => {
-  for (const [key, price] of Object.entries(DEFAULT_UNIT_PRICES)) {
+// Tính đơn giá thông minh theo cả đơn vị tính và tên nguyên liệu
+const guessUnitPrice = (cleanKey, unit = '') => {
+  const uLower = (unit || '').toLowerCase();
+
+  // 1. Nếu đơn vị tính là gram: tra cứu trong bảng giá khối lượng
+  if (uLower === 'g') {
+    for (const [key, price] of Object.entries(WEIGHT_PRICES_PER_GRAM)) {
+      if (cleanKey.includes(key) || key.includes(cleanKey)) return price;
+    }
+    return 150; // Mặc định an toàn: 150đ/g = 15.000đ/lạng
+  }
+
+  // 2. Nếu đơn vị tính là bó rau
+  if (uLower.includes('bó')) {
+    return 8000;
+  }
+
+  // 3. Nếu đơn vị tính là đơn vị đếm (quả, củ, miếng, gói...)
+  for (const [key, price] of Object.entries(UNIT_COUNT_PRICES)) {
     if (cleanKey.includes(key) || key.includes(cleanKey)) return price;
   }
-  return 3000;
+
+  return 5000; // Mặc định đơn vị lẻ khác
 };
 
 export default function CartModal({
@@ -161,7 +191,7 @@ export default function CartModal({
   onClearCart,
   priceMap = {},
 }) {
-  const [viewMode, setViewMode] = useState('merged'); // 'merged' | 'byDish'
+  const [viewMode, setViewMode] = useState('merged');
   const [checkedItems, setCheckedItems] = useState({});
   const [customUnitPrices, setCustomUnitPrices] = useState({});
   const [deductFridge, setDeductFridge] = useState(true);
@@ -199,13 +229,14 @@ export default function CartModal({
     }
   };
 
-  const getUnitPrice = (key) => {
+  const getUnitPrice = (key, unit = '') => {
+    const storageKey = `${key}__${unit}`;
+    if (customUnitPrices[storageKey] !== undefined) return customUnitPrices[storageKey];
     if (customUnitPrices[key] !== undefined) return customUnitPrices[key];
     if (priceMap && priceMap[key] !== undefined) return priceMap[key];
-    return guessUnitPrice(key);
+    return guessUnitPrice(key, unit);
   };
 
-  // Kiểm tra xem nguyên liệu có sẵn trong tủ lạnh hay không
   const isItemInFridge = (cleanKey, rawName) => {
     const target = `${cleanKey} ${rawName}`.toLowerCase();
     return fridgeItems.some((f) => {
@@ -245,21 +276,21 @@ export default function CartModal({
 
   const mergedItems = Object.values(mergedList);
 
-  // Tính tổng chi phí (loại bỏ món đã có trong tủ nếu người dùng bật đối chiếu tủ lạnh)
+  // Tính tổng chi phí
   const totalCost = (viewMode === 'merged' ? mergedItems : shoppingList).reduce((sum, item) => {
     if (viewMode === 'merged') {
       if (deductFridge && item.inFridge) return sum;
-      const uPrice = getUnitPrice(item.key);
+      const uPrice = getUnitPrice(item.key, item.unit);
       return sum + Math.round(item.totalQuantity * uPrice);
     } else {
       const parsed = parseIngredient(item.text);
       if (deductFridge && isItemInFridge(parsed.cleanKey, parsed.name)) return sum;
-      const uPrice = getUnitPrice(parsed.cleanKey);
+      const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
       return sum + Math.round(parsed.quantity * uPrice);
     }
   }, 0);
 
-  // 1. Sao chép tin nhắn Zalo kèm trạng thái tủ lạnh
+  // 1. Sao chép tin nhắn Zalo
   const handleCopyForZalo = () => {
     if (shoppingList.length === 0) return;
 
@@ -272,7 +303,7 @@ export default function CartModal({
 
       textToSend += '👉 NGUYÊN LIỆU CẦN MUA NGOÀI CHỢ:\n';
       neededItems.forEach((item, index) => {
-        const uPrice = getUnitPrice(item.key);
+        const uPrice = getUnitPrice(item.key, item.unit);
         const itemTotal = Math.round(item.totalQuantity * uPrice);
         textToSend += `${index + 1}. ${item.name}: ${item.totalQuantity} ${item.unit} [👉 ${item.suggested}] (~${itemTotal.toLocaleString('vi-VN')}đ)\n`;
         textToSend += `   🍲 Dùng cho: ${item.dishes.join(', ')}\n`;
@@ -280,7 +311,7 @@ export default function CartModal({
 
       if (fridgeAvailable.length > 0) {
         textToSend += '\n🧊 ĐÃ CÓ TRONG TỦ LẠNH (KHÔNG CẦN MUA):\n';
-        fridgeAvailable.forEach((item, index) => {
+        fridgeAvailable.forEach((item) => {
           textToSend += `✓ ${item.name}: ${item.totalQuantity} ${item.unit} (${item.dishes.join(', ')})\n`;
         });
       }
@@ -288,7 +319,7 @@ export default function CartModal({
       shoppingList.forEach((item, index) => {
         const parsed = parseIngredient(item.text);
         const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
-        const uPrice = getUnitPrice(parsed.cleanKey);
+        const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
         const itemTotal = Math.round(parsed.quantity * uPrice);
         textToSend += `${index + 1}. ${item.text} ${inF ? '[Đã có sẵn]' : `(~${itemTotal.toLocaleString('vi-VN')}đ)`} [${item.dish}]\n`;
       });
@@ -304,7 +335,7 @@ export default function CartModal({
       .catch((err) => alert('Lỗi sao chép: ' + err.message));
   };
 
-  // 2. Xuất Excel chi tiết
+  // 2. Xuất Excel
   const handleExportExcel = () => {
     if (shoppingList.length === 0) return;
 
@@ -312,7 +343,7 @@ export default function CartModal({
     if (viewMode === 'merged') {
       excelData = mergedItems.map((item, idx) => {
         const inF = deductFridge && item.inFridge;
-        const uPrice = getUnitPrice(item.key);
+        const uPrice = getUnitPrice(item.key, item.unit);
         return {
           'STT': idx + 1,
           'Tên nguyên liệu': item.name,
@@ -327,7 +358,7 @@ export default function CartModal({
       excelData = shoppingList.map((item, idx) => {
         const parsed = parseIngredient(item.text);
         const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
-        const uPrice = getUnitPrice(parsed.cleanKey);
+        const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
         return {
           'STT': idx + 1,
           'Món ăn': item.dish,
@@ -368,7 +399,7 @@ export default function CartModal({
       .map((item, idx) => {
         if (viewMode === 'merged') {
           const inF = deductFridge && item.inFridge;
-          const uPrice = getUnitPrice(item.key);
+          const uPrice = getUnitPrice(item.key, item.unit);
           const itemTotal = inF ? 0 : Math.round(item.totalQuantity * uPrice);
           return `
             <tr>
@@ -387,7 +418,7 @@ export default function CartModal({
         }
         const parsed = parseIngredient(item.text);
         const inF = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
-        const uPrice = getUnitPrice(parsed.cleanKey);
+        const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
         const itemTotal = inF ? 0 : Math.round(parsed.quantity * uPrice);
         return `
           <tr>
@@ -545,7 +576,7 @@ export default function CartModal({
                   const itemKey = `merged-${item.groupKey}`;
                   const isDone = !!checkedItems[itemKey];
                   const inFridge = deductFridge && item.inFridge;
-                  const uPrice = getUnitPrice(item.key);
+                  const uPrice = getUnitPrice(item.key, item.unit);
                   const itemTotal = inFridge ? 0 : Math.round(item.totalQuantity * uPrice);
 
                   return (
@@ -604,7 +635,7 @@ export default function CartModal({
                             <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                               <input
                                 type="number"
-                                step="100"
+                                step={item.unit === 'g' ? '10' : '500'}
                                 value={uPrice}
                                 onChange={(e) => handleUnitPriceChange(item.key, e.target.value)}
                                 style={cartStyles.priceInput}
@@ -626,7 +657,7 @@ export default function CartModal({
                   const isDone = !!checkedItems[itemKey];
                   const parsed = parseIngredient(item.text);
                   const inFridge = deductFridge && isItemInFridge(parsed.cleanKey, parsed.name);
-                  const uPrice = getUnitPrice(parsed.cleanKey);
+                  const uPrice = getUnitPrice(parsed.cleanKey, parsed.unit);
                   const itemTotal = inFridge ? 0 : Math.round(parsed.quantity * uPrice);
 
                   return (
