@@ -63,7 +63,7 @@ export default function Home() {
   const [cookModeRecipe, setCookModeRecipe] = useState(null);
   const [cookStep, setCookStep] = useState(0);
 
-  // Nạp tồn kho tủ lạnh từ LocalStorage & Đăng ký Service Worker cho PWA
+  // Nạp tồn kho tủ lạnh từ LocalStorage & Đăng ký Service Worker + Lưu sự kiện cài PWA
   useEffect(() => {
     if (typeof window !== 'undefined') {
       // 1. Đăng ký Service Worker
@@ -73,7 +73,14 @@ export default function Home() {
           .catch((err) => console.warn('Lỗi đăng ký Service Worker:', err));
       }
 
-      // 2. Nạp tồn kho tủ lạnh
+      // 2. Bắt và lưu lại prompt cài đặt PWA vào window để nút Header có thể gọi
+      const handleBeforeInstall = (e) => {
+        e.preventDefault();
+        window.deferredPrompt = e;
+      };
+      window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
+      // 3. Nạp tồn kho tủ lạnh
       try {
         const savedFridge = localStorage.getItem('bepnha_fridge_items');
         if (savedFridge) {
@@ -82,8 +89,35 @@ export default function Home() {
       } catch (e) {
         console.error('Lỗi nạp tồn kho tủ lạnh:', e);
       }
+
+      return () => {
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      };
     }
   }, []);
+
+  // Hàm xử lý khi người dùng bấm nút Cài App trên Header
+  const handleInstallApp = () => {
+    if (typeof window === 'undefined') return;
+
+    if (window.deferredPrompt) {
+      window.deferredPrompt.prompt();
+      window.deferredPrompt.userChoice.then(({ outcome }) => {
+        if (outcome === 'accepted') {
+          window.deferredPrompt = null;
+        }
+      });
+    } else {
+      const userAgent = window.navigator.userAgent.toLowerCase();
+      const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
+
+      if (isIosDevice) {
+        alert('📲 Để cài trên iPhone/iPad:\n1. Bấm nút "Chia sẻ" (Share/biểu tượng ô vuông mũi tên lên) ở thanh dưới Safari.\n2. Chọn "Thêm vào MH chính" (Add to Home Screen).');
+      } else {
+        alert('💻 Để cài trên Máy tính / Android:\n- Chrome Desktop: Bấm vào biểu tượng Cài đặt ở góc phải thanh địa chỉ web 💻\n- Android: Chọn menu 3 chấm ở góc phải trình duyệt -> "Cài đặt ứng dụng" hoặc "Thêm vào màn hình chính" 📲');
+      }
+    }
+  };
 
   // Hàm cập nhật kho tủ lạnh và lưu localStorage
   const handleUpdateFridge = (newItems) => {
@@ -555,7 +589,29 @@ export default function Home() {
         }}
       >
         <h1 style={{ margin: 0 }}>🍳 Bếp Nhà Món Ngon</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Nút Cài đặt App hiển thị trực tiếp trên Header */}
+          <button
+            onClick={handleInstallApp}
+            style={{
+              padding: '7px 12px',
+              borderRadius: '10px',
+              border: '1px solid #27ae60',
+              background: '#f0fff4',
+              color: '#27ae60',
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              boxShadow: '0 1px 4px rgba(39, 174, 96, 0.15)',
+            }}
+            title="Cài đặt ứng dụng về điện thoại hoặc máy tính"
+          >
+            📲 Cài App
+          </button>
+
           {user ? (
             <>
               <button
