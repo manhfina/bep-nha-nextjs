@@ -5,10 +5,13 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Ưu tiên biến font Plus Jakarta Sans từ layout, fallback an toàn về font hệ thống */
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background-color: #f7f3eb;
   color: #333;
   padding: 20px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .container {
@@ -25,6 +28,8 @@ header h1 {
   color: #d35400;
   font-size: 2.2rem;
   margin-bottom: 6px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 header p {
@@ -48,6 +53,7 @@ header p {
   width: 260px;
   font-size: 0.9rem;
   background: #fff;
+  font-family: inherit;
 }
 
 .btn-filter, .btn-primary {
@@ -58,6 +64,7 @@ header p {
   font-weight: 600;
   font-size: 0.85rem;
   transition: all 0.2s;
+  font-family: inherit;
 }
 
 .btn-filter {
@@ -92,6 +99,7 @@ header p {
   background: #fff;
   cursor: pointer;
   font-size: 0.8rem;
+  font-family: inherit;
 }
 
 .tag-btn.active {
@@ -150,16 +158,22 @@ header p {
   flex: 1;
 }
 
+/* Tiêu đề món ăn: Nét đậm, gọn gàng và nổi bật */
 .card-info h3 {
   margin-bottom: 6px;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1a202c;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
 }
 
 .card-info p {
   color: #666;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   margin-bottom: 12px;
   flex: 1;
+  line-height: 1.45;
 }
 
 .card-meta {
@@ -167,9 +181,9 @@ header p {
   justify-content: space-between;
   border-top: 1px dashed #eee;
   padding-top: 8px;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   color: #e67e22;
-  font-weight: bold;
+  font-weight: 700;
 }
 
 /* Nút giỏ đi chợ nổi */
@@ -182,7 +196,8 @@ header p {
   border: none;
   border-radius: 30px;
   padding: 12px 20px;
-  font-weight: bold;
+  font-weight: 700;
+  font-family: inherit;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   display: flex;
@@ -196,6 +211,7 @@ header p {
   border-radius: 50%;
   padding: 2px 7px;
   font-size: 0.75rem;
+  font-weight: 700;
 }
 
 /* Modal Popup */
@@ -261,6 +277,7 @@ header p {
   height: 26px;
   cursor: pointer;
 }
+
 @keyframes pulseMic {
   0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); }
   50% { transform: scale(1.12); box-shadow: 0 0 0 8px rgba(231, 76, 60, 0); }

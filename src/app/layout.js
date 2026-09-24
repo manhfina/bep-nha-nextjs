@@ -1,4 +1,13 @@
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
+
+// Khởi tạo font Plus Jakarta Sans tối ưu cho tiếng Việt
+const fontSans = Plus_Jakarta_Sans({
+  subsets: ['latin', 'vietnamese'],
+  weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
+  variable: '--font-sans',
+});
 
 export const metadata = {
   title: 'Bếp Nhà Món Ngon',
@@ -18,7 +27,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="vi">
+    <html lang="vi" className={fontSans.variable}>
       <head>
         <link rel="manifest" href="/manifest.json" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -38,7 +47,7 @@ export default function RootLayout({ children }) {
           href="https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=192&h=192&fit=crop&crop=faces"
         />
       </head>
-      <body>
+      <body className={fontSans.className}>
         {children}
 
         {/* Đăng ký Service Worker cho chế độ Offline PWA */}
