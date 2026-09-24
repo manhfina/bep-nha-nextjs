@@ -21,6 +21,7 @@ const DEFAULT_PRICES = {
   'tôm': { price_per_unit: 200000, unit: 'kg' },
   'mực': { price_per_unit: 220000, unit: 'kg' },
   'cá': { price_per_unit: 90000, unit: 'kg' },
+  'cá lóc': { price_per_unit: 110000, unit: 'kg' },
 
   // Nhóm dừa & quả đặc thù
   'nước dừa tươi': { price_per_unit: 20000, unit: 'quả' },
@@ -80,10 +81,15 @@ const DEFAULT_PRICES = {
   'hành tím': { price_per_unit: 50000, unit: 'kg' },
   'hành khô': { price_per_unit: 50000, unit: 'kg' },
   'hành lá': { price_per_unit: 35000, unit: 'kg' },
+  'tỏi băm': { price_per_unit: 60000, unit: 'kg' },
   'tỏi': { price_per_unit: 60000, unit: 'kg' },
   'gừng': { price_per_unit: 40000, unit: 'kg' },
   'ớt xiêm xanh': { price_per_unit: 70000, unit: 'kg' },
+  'ớt hiểm': { price_per_unit: 60000, unit: 'kg' },
   'ớt': { price_per_unit: 60000, unit: 'kg' },
+  'nước màu thốt nốt': { price_per_unit: 70000, unit: 'lít' },
+  'nước màu': { price_per_unit: 60000, unit: 'lít' },
+  'nước hàng': { price_per_unit: 60000, unit: 'lít' },
   'ngũ vị hương': { price_per_unit: 4000, unit: 'gói' },
   'dầu màu điều': { price_per_unit: 40000, unit: 'lít' },
   'mắm tôm': { price_per_unit: 30000, unit: 'chai' },
@@ -95,6 +101,7 @@ const DEFAULT_PRICES = {
   'hạt nêm': { price_per_unit: 40000, unit: 'kg' },
   'bột ngọt': { price_per_unit: 45000, unit: 'kg' },
   'mì chính': { price_per_unit: 45000, unit: 'kg' },
+  'tiêu': { price_per_unit: 160000, unit: 'kg' },
 
   // Tinh bột & mì
   'bún tươi': { price_per_unit: 15000, unit: 'kg' },
@@ -177,6 +184,10 @@ function findMatchedPrice(cleanName, priceMap = {}) {
 
   // 2. Fallback tìm kiếm thông minh theo danh mục lớn
   if (cleanName.includes('dừa')) return merged['nước dừa tươi'];
+  if (cleanName.includes('nước màu') || cleanName.includes('nước hàng')) return merged['nước màu'];
+  if (cleanName.includes('hành tím') || cleanName.includes('hành khô')) return merged['hành tím'];
+  if (cleanName.includes('hành lá')) return merged['hành lá'];
+  if (cleanName.includes('tỏi')) return merged['tỏi'];
   if (cleanName.includes('vịt')) return merged['thịt vịt'];
   if (cleanName.includes('gà ta')) return merged['thịt gà ta'];
   if (cleanName.includes('gà')) return merged['thịt gà'];
@@ -222,10 +233,10 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
   // Nếu hoàn toàn không match được giá
   if (!matchedPrice) {
     let cost = 2000;
-    if (/(dầu hào|nước tương|xì dầu|nước mắm|mắm|dầu ăn|giấm)/i.test(cleanName)) {
-      cost = Math.round(amount * 50);
+    if (/(dầu hào|nước tương|xì dầu|nước mắm|mắm|dầu ăn|giấm|nước màu)/i.test(cleanName)) {
+      cost = Math.round(amount * 500);
     } else if (/(hạt nêm|bột ngọt|muối|đường|tiêu)/i.test(cleanName)) {
-      cost = Math.round(amount * 30);
+      cost = Math.round(amount * 300);
     } else if (['g', 'gam', 'gr', 'ml'].includes(unit)) {
       cost = Math.round((amount / 1000) * 35000);
     }
@@ -260,7 +271,6 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
     if (standardUnit === 'kg' || standardUnit === 'lít') {
       finalCost = (amount / 1000) * price;
     } else if (['gói', 'hộp', 'chai'].includes(standardUnit)) {
-      // Gói ngũ vị hương ~5g hoặc chai nhỏ ~500g
       const defaultPackWeight = cleanName.includes('ngũ vị') ? 5 : 500;
       finalCost = (amount / defaultPackWeight) * price;
     } else {
@@ -271,7 +281,11 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
   else if (unit.includes('cà phê')) {
     finalCost = amount * 300;
   } else if (unit.includes('canh') || unit.includes('thìa') || unit.includes('muỗng')) {
-    finalCost = amount * 800;
+    if (cleanName.includes('nước màu') || cleanName.includes('dầu hào') || cleanName.includes('mắm')) {
+      finalCost = amount * 1500;
+    } else {
+      finalCost = amount * 800;
+    }
   }
   // 4. Nếu đơn vị là LẠNG (1 lạng = 100g = 0.1 kg)
   else if (unit === 'lạng') {
@@ -281,14 +295,24 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
   else if (['lít', 'lit', 'kg', 'kilogram'].includes(unit)) {
     finalCost = amount * price;
   }
-  // 6. Nếu đơn vị là ĐƠN VỊ ĐẾM (quả, trái, củ, cây, vắt, miếng, gói, chai)
-  else if (['quả', 'trái', 'miếng', 'vắt', 'cây', 'gói', 'bó', 'mớ', 'chai', 'hộp'].includes(unit)) {
+  // 6. Nếu đơn vị là ĐƠN VỊ ĐẾM (quả, trái, củ, cây, nhánh, tép, vắt, miếng, gói, bó, mớ...)
+  else if (['quả', 'trái', 'miếng', 'vắt', 'cây', 'gói', 'bó', 'mớ', 'chai', 'hộp', 'củ', 'nhánh', 'tép', 'cọng'].includes(unit)) {
     if (standardUnit === 'kg') {
-      let kgFactor = 0.1; // Mặc định 1 củ/quả ~ 100g
-      if (unit === 'bó' || unit === 'mớ') kgFactor = 0.35;
-      else if (cleanName.includes('ớt')) kgFactor = 0.005;
-      else if (cleanName.includes('cà chua')) kgFactor = 0.1;
-      else if (cleanName.includes('khoai') || cleanName.includes('cà rốt')) kgFactor = 0.15;
+      let kgFactor = 0.1; // Mặc định 1 củ/quả vừa ~ 100g
+
+      if (unit === 'bó' || unit === 'mớ') {
+        kgFactor = 0.35;
+      } else if (/(hành tím|tỏi|hành khô|gừng|riềng)/i.test(cleanName) || ['củ', 'tép'].includes(unit)) {
+        kgFactor = 0.015; // 1 củ hành, củ tỏi, nhánh gừng ~ 15g (0.015 kg -> ~750đ - 900đ)
+      } else if (['nhánh', 'cọng'].includes(unit) || cleanName.includes('hành lá')) {
+        kgFactor = 0.01; // 1 nhánh hành lá ~ 10g (0.01 kg -> ~350đ)
+      } else if (cleanName.includes('ớt')) {
+        kgFactor = 0.005; // 1 trái ớt ~ 5g (~300đ)
+      } else if (cleanName.includes('cà chua')) {
+        kgFactor = 0.1;
+      } else if (cleanName.includes('khoai') || cleanName.includes('cà rốt')) {
+        kgFactor = 0.15;
+      }
       finalCost = amount * kgFactor * price;
     } else {
       finalCost = amount * price;

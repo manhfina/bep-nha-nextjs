@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Bếp Nhà</string>
+    <string name="title_activity_main">Bếp Nhà</string>
+    <string name="package_name">com.bepnha.app</string>
+    <string name="custom_url_scheme">com.bepnha.app</string>
+</resources>
