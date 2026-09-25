@@ -287,7 +287,7 @@ export default function MealPlannerModal({
                   color: isAiOpen ? '#fff' : '#8e44ad',
                 }}
               >
-                ✨ AI Chef Copilot
+                ✨ Gợi ý thực đơn tự động
               </button>
             </div>
             <span style={{ fontSize: '0.8rem', color: '#636e72' }}>
