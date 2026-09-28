@@ -1,5 +1,5 @@
 // src/lib/priceCalculator.js
-import { supabase } from './supabaseClient';
+import { supabase } from './supabase';
 
 // Bảng giá thị trường chuẩn Việt Nam (Fallback khi offline hoặc chưa đồng bộ được)
 export const DEFAULT_PRICES = {
