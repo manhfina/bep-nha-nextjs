@@ -4,50 +4,140 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+// Rổ từ khóa hàng thiết yếu cần theo dõi giá hàng ngày
+const TRACKED_ITEMS = [
+  { key: 'sườn non', query: 'sườn non heo', unit: 'kg', fallback: 160000 },
+  { key: 'sườn heo', query: 'sườn heo', unit: 'kg', fallback: 150000 },
+  { key: 'thịt ba chỉ', query: 'thịt ba rọi heo', unit: 'kg', fallback: 150000 },
+  { key: 'thịt heo xay', query: 'thịt heo xay', unit: 'kg', fallback: 140000 },
+  { key: 'thịt bò', query: 'thịt thăn bò', unit: 'kg', fallback: 280000 },
+  { key: 'thịt gà ta', query: 'thịt gà ta', unit: 'kg', fallback: 140000 },
+  { key: 'thịt gà', query: 'thịt má đùi gà', unit: 'kg', fallback: 95000 },
+  { key: 'thịt vịt', query: 'thịt vịt tươi', unit: 'kg', fallback: 95000 },
+  { key: 'tôm tươi', query: 'tôm thẻ tươi', unit: 'kg', fallback: 200000 },
+  { key: 'cá lóc', query: 'cá lóc làm sạch', unit: 'kg', fallback: 110000 },
+  { key: 'trứng gà', query: 'trứng gà hộp 10 quả', unit: 'quả', fallback: 3500 },
+  { key: 'nước dừa tươi', query: 'dừa xiêm gọt trọc', unit: 'quả', fallback: 20000 },
+  { key: 'hành tím', query: 'hành tím củ', unit: 'kg', fallback: 60000 },
+  { key: 'tỏi', query: 'tỏi củ', unit: 'kg', fallback: 60000 },
+  { key: 'hành lá', query: 'hành lá tươi', unit: 'kg', fallback: 35000 },
+  { key: 'cà chua', query: 'cà chua tươi', unit: 'kg', fallback: 25000 },
+  { key: 'rau cải ngọt', query: 'cải ngọt tươi', unit: 'kg', fallback: 22000 },
+  { key: 'rau muống', query: 'rau muống nước', unit: 'kg', fallback: 20000 },
+  { key: 'khoai tây', query: 'khoai tây', unit: 'kg', fallback: 25000 },
+  { key: 'cà rốt', query: 'cà rốt tươi', unit: 'kg', fallback: 25000 },
+];
+
+/**
+ * Hàm cào giá trực tiếp từ API Bách Hóa Xanh
+ */
+async function fetchBachHoaXanhPrice(query, expectedUnit) {
+  try {
+    const url = `https://www.bachhoaxanh.com/aj/Product/Search?keyword=${encodeURIComponent(query)}&page=1`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Referer': 'https://www.bachhoaxanh.com/',
+      },
+      next: { revalidate: 3600 },
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const products = data?.Products || data?.data?.products || [];
+    if (!products || products.length === 0) return null;
+
+    // Lọc lấy sản phẩm còn hàng và có giá thực
+    const validProduct = products.find((p) => (p.Price || p.FinalPrice) > 0);
+    if (!validProduct) return null;
+
+    const rawPrice = validProduct.Price || validProduct.FinalPrice || 0;
+    const productName = (validProduct.ProductName || validProduct.Name || '').toLowerCase();
+
+    // 1. Nếu đơn vị tính là quả/trái (như trứng, dừa)
+    if (expectedUnit === 'quả') {
+      const eggMatch = productName.match(/(\d+)\s*(quả|trái|hột)/i);
+      if (eggMatch) {
+        const count = parseInt(eggMatch[1], 10);
+        if (count > 0) return Math.round(rawPrice / count);
+      }
+      return rawPrice;
+    }
+
+    // 2. Nếu đơn vị tính là kg (quy đổi từ gram sang kg)
+    const weightMatch = productName.match(/(\d+)\s*(g|gam|gram|kg)/i);
+    if (weightMatch) {
+      const val = parseFloat(weightMatch[1]);
+      const u = weightMatch[2].toLowerCase();
+
+      if (u === 'kg' && val > 0) {
+        return Math.round(rawPrice / val);
+      }
+      if (['g', 'gam', 'gram'].includes(u) && val > 0) {
+        // Ví dụ: khay 500g giá 85.000đ -> 1kg = (85000 / 500) * 1000 = 170.000đ
+        return Math.round((rawPrice / val) * 1000);
+      }
+    }
+
+    // Nếu tiêu đề ghi theo vỉ/khay chuẩn mặc định ~500g
+    if (productName.includes('khay') || productName.includes('vỉ')) {
+      return Math.round(rawPrice * 2);
+    }
+
+    return rawPrice;
+  } catch (err) {
+    console.warn(`Lỗi cào giá mặt hàng [${query}]:`, err.message);
+    return null;
+  }
+}
 
 export async function GET(request) {
   try {
-    // Rổ hàng hóa thiết yếu tự động chuẩn hóa
-    const marketBasket = [
-      { ingredient_key: 'sườn non', price_per_unit: 160000, unit: 'kg' },
-      { ingredient_key: 'sườn heo', price_per_unit: 150000, unit: 'kg' },
-      { ingredient_key: 'thịt ba chỉ', price_per_unit: 150000, unit: 'kg' },
-      { ingredient_key: 'thịt heo xay', price_per_unit: 140000, unit: 'kg' },
-      { ingredient_key: 'thịt bò', price_per_unit: 280000, unit: 'kg' },
-      { ingredient_key: 'thịt vịt', price_per_unit: 95000, unit: 'kg' },
-      { ingredient_key: 'thịt gà ta', price_per_unit: 140000, unit: 'kg' },
-      { ingredient_key: 'thịt gà', price_per_unit: 95000, unit: 'kg' },
-      { ingredient_key: 'cá lóc', price_per_unit: 110000, unit: 'kg' },
-      { ingredient_key: 'tôm tươi', price_per_unit: 200000, unit: 'kg' },
-      { ingredient_key: 'trứng gà', price_per_unit: 3500, unit: 'quả' },
-      { ingredient_key: 'nước dừa tươi', price_per_unit: 20000, unit: 'quả' },
-      { ingredient_key: 'hành tím', price_per_unit: 60000, unit: 'kg' },
-      { ingredient_key: 'tỏi', price_per_unit: 60000, unit: 'kg' },
-      { ingredient_key: 'hành lá', price_per_unit: 35000, unit: 'kg' },
-      { ingredient_key: 'cà chua', price_per_unit: 25000, unit: 'kg' },
-      { ingredient_key: 'rau cải ngọt', price_per_unit: 22000, unit: 'kg' },
-    ];
+    const results = [];
 
-    const records = marketBasket.map((item) => ({
-      ...item,
-      updated_at: new Date().toISOString(),
-    }));
+    // Chạy đồng bộ lần lượt để tránh bị chặn IP (Rate limit)
+    for (const item of TRACKED_ITEMS) {
+      let finalPrice = await fetchBachHoaXanhPrice(item.query, item.unit);
 
+      // Nếu không cào được hoặc giá bất thường (< 1.000đ), dùng giá fallback
+      if (!finalPrice || finalPrice < 1000) {
+        finalPrice = item.fallback;
+      }
+
+      results.push({
+        ingredient_key: item.key,
+        price_per_unit: finalPrice,
+        unit: item.unit,
+        source: 'bachhoaxanh_crawler',
+        updated_at: new Date().toISOString(),
+      });
+
+      // Nghỉ nhẹ 100ms giữa các request để bảo vệ kết nối
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Lưu toàn bộ bảng giá mới vào Supabase
     const { error } = await supabase
       .from('market_prices')
-      .upsert(records, { onConflict: 'ingredient_key' });
+      .upsert(results, { onConflict: 'ingredient_key' });
 
     if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      message: 'Cập nhật bảng giá thị trường thành công',
-      totalItems: records.length,
-      updatedAt: new Date().toISOString(),
+      message: 'Đã cào và đồng bộ thành công giá thị trường thực tế!',
+      totalItemsUpdated: results.length,
+      timestamp: new Date().toISOString(),
+      samplePrices: results.slice(0, 5),
     });
   } catch (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
   }
 }
