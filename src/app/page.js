@@ -60,6 +60,7 @@ export default function Home() {
   const [selectedTag, setSelectedTag] = useState(null);
   const [selectedDifficulty, setSelectedDifficulty] = useState('all');
   const [selectedTimeRange, setSelectedTimeRange] = useState('all');
+  const [selectedCookingMethod, setSelectedCookingMethod] = useState('all');
 
   // Modals state
   const [activeRecipe, setActiveRecipe] = useState(null);
@@ -185,17 +186,43 @@ export default function Home() {
     }
   };
 
-  const formatRecipe = (item) => ({
-    ...item,
-    desc: item.desc || item.description || '',
-    time: item.time || (item.cook_time ? `${item.cook_time} phút` : '15 phút'),
-    image:
-      item.image ||
-      item.image_url ||
-      'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
-    baseServings: item.base_servings || item.baseServings || 2,
-    steps: item.steps || item.instructions || [],
-  });
+  const formatRecipe = (item) => {
+    let rawTitle = item.title || '';
+    let detectedMethod = item.cooking_method || item.cookingMethod || '';
+
+    // Tự động nhận diện thiết bị nếu tiêu đề hoặc mô tả chứa từ khóa
+    if (!detectedMethod) {
+      const lowerTitle = rawTitle.toLowerCase();
+      const lowerDesc = (item.desc || item.description || '').toLowerCase();
+      if (lowerTitle.includes('nồi chiên không dầu') || lowerDesc.includes('nồi chiên không dầu')) {
+        detectedMethod = 'Nồi chiên không dầu';
+      } else if (lowerTitle.includes('lò nướng') || lowerDesc.includes('lò nướng')) {
+        detectedMethod = 'Lò nướng';
+      } else {
+        detectedMethod = 'Bếp thường';
+      }
+    }
+
+    // Làm gọn tên món ăn, loại bỏ phần text dài dòng trong ngoặc
+    const cleanTitle = rawTitle
+      .replace(/\s*\((bằng\s*)?nồi chiên không dầu\)/gi, '')
+      .replace(/\s*\((bằng\s*)?lò nướng\)/gi, '')
+      .trim();
+
+    return {
+      ...item,
+      title: cleanTitle,
+      cooking_method: detectedMethod,
+      desc: item.desc || item.description || '',
+      time: item.time || (item.cook_time ? `${item.cook_time} phút` : '15 phút'),
+      image:
+        item.image ||
+        item.image_url ||
+        'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
+      baseServings: item.base_servings || item.baseServings || 2,
+      steps: item.steps || item.instructions || [],
+    };
+  };
 
   const fetchRecipes = async () => {
     const cached = getCachedData(CacheKeys.RECIPES);
@@ -223,13 +250,11 @@ export default function Home() {
   };
 
   const fetchPrices = async () => {
-    // 1. Kiểm tra cache cục bộ
     const cachedPrices = getCachedData(CacheKeys.PRICES);
     if (cachedPrices && Object.keys(cachedPrices).length > 0) {
       setPriceMap(cachedPrices);
     }
 
-    // 2. Tải bảng giá thị trường mới nhất từ Supabase (market_prices)
     try {
       const dynamicPrices = await fetchMarketPrices();
       if (dynamicPrices && Object.keys(dynamicPrices).length > 0) {
@@ -241,7 +266,6 @@ export default function Home() {
       console.warn('Lỗi khi fetchMarketPrices từ Supabase:', err);
     }
 
-    // 3. Fallback qua API nội bộ nếu có
     try {
       const data = await fetchWithDedupe('/api/prices');
       if (data && !data.error) {
@@ -636,6 +660,7 @@ export default function Home() {
     setSelectedTag(null);
     setSelectedDifficulty('all');
     setSelectedTimeRange('all');
+    setSelectedCookingMethod('all');
   };
 
   const filteredRecipes = recipes.filter((item) => {
@@ -659,11 +684,19 @@ export default function Home() {
     else if (selectedTimeRange === '15to30') matchTime = minutes >= 15 && minutes <= 30;
     else if (selectedTimeRange === 'above30') matchTime = minutes > 30;
 
-    return matchSearch && matchTag && matchTab && matchDifficulty && matchTime;
+    const method = item.cooking_method || 'Bếp thường';
+    const matchMethod = selectedCookingMethod === 'all' ? true : method === selectedCookingMethod;
+
+    return matchSearch && matchTag && matchTab && matchDifficulty && matchTime && matchMethod;
   });
 
   const hasActiveFilters =
-    searchTerm || selectedTag || currentTab !== 'all' || selectedDifficulty !== 'all' || selectedTimeRange !== 'all';
+    searchTerm ||
+    selectedTag ||
+    currentTab !== 'all' ||
+    selectedDifficulty !== 'all' ||
+    selectedTimeRange !== 'all' ||
+    selectedCookingMethod !== 'all';
 
   const getUserDisplayName = () => {
     if (!user) return '';
@@ -1020,6 +1053,28 @@ export default function Home() {
               </button>
             ))
           )}
+        </div>
+
+        {/* Bộ lọc Thiết bị nấu */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'bold' }}>Thiết bị:</span>
+          <select
+            value={selectedCookingMethod}
+            onChange={(e) => setSelectedCookingMethod(e.target.value)}
+            style={{
+              padding: '6px 10px',
+              borderRadius: '10px',
+              border: '1px solid #ccc',
+              fontSize: '0.85rem',
+              outline: 'none',
+              background: '#fff',
+            }}
+          >
+            <option value="all">Tất cả</option>
+            <option value="Bếp thường">🍳 Bếp thường</option>
+            <option value="Nồi chiên không dầu">⚡ Nồi chiên không dầu</option>
+            <option value="Lò nướng">🔥 Lò nướng</option>
+          </select>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

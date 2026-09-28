@@ -25,6 +25,8 @@ export default function RecipeCard({
     onToggleFav(e, recipe.id);
   };
 
+  const cookingMethod = recipe.cooking_method || 'Bếp thường';
+
   return (
     <div className="recipe-card" onClick={() => onOpenDetail(recipe)}>
       <div className="card-image-wrap" style={{ position: 'relative' }}>
@@ -111,9 +113,9 @@ export default function RecipeCard({
           {recipe.desc || 'Chưa có mô tả'}
         </p>
 
-        {/* Huy hiệu hiển thị chi phí dự kiến */}
-        {estimatedCost > 0 && (
-          <div style={{ marginBottom: '10px' }}>
+        {/* Khu vực huy hiệu: Giá tiền & Phương pháp/Thiết bị nấu */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginBottom: '10px' }}>
+          {estimatedCost > 0 && (
             <span
               style={{
                 display: 'inline-flex',
@@ -129,8 +131,48 @@ export default function RecipeCard({
             >
               💰 ~{estimatedCost.toLocaleString('vi-VN')}đ / {recipe.baseServings || 2} người
             </span>
-          </div>
-        )}
+          )}
+
+          {/* Huy hiệu Nồi chiên không dầu */}
+          {cookingMethod === 'Nồi chiên không dầu' && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                fontSize: '0.75rem',
+                color: '#d35400',
+                backgroundColor: '#fff3e0',
+                border: '1px solid #ffe0b2',
+                padding: '2px 8px',
+                borderRadius: '8px',
+                fontWeight: '700',
+              }}
+            >
+              ⚡ NCKD
+            </span>
+          )}
+
+          {/* Huy hiệu Lò nướng */}
+          {cookingMethod === 'Lò nướng' && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                fontSize: '0.75rem',
+                color: '#c0392b',
+                backgroundColor: '#fbe9e7',
+                border: '1px solid #ffccbc',
+                padding: '2px 8px',
+                borderRadius: '8px',
+                fontWeight: '700',
+              }}
+            >
+              🔥 Lò nướng
+            </span>
+          )}
+        </div>
 
         <div
           style={{
