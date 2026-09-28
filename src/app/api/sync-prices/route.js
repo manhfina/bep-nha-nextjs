@@ -2,6 +2,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -10,8 +13,10 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const TRACKED_ITEMS = [
   { key: 'sườn non', query: 'sườn non heo', unit: 'kg', fallback: 160000 },
   { key: 'sườn heo', query: 'sườn heo', unit: 'kg', fallback: 150000 },
+  { key: 'sườn', query: 'sườn heo', unit: 'kg', fallback: 150000 },
   { key: 'thịt ba chỉ', query: 'thịt ba rọi heo', unit: 'kg', fallback: 150000 },
   { key: 'thịt heo xay', query: 'thịt heo xay', unit: 'kg', fallback: 140000 },
+  { key: 'thịt heo', query: 'thịt nạc heo', unit: 'kg', fallback: 140000 },
   { key: 'thịt bò', query: 'thịt thăn bò', unit: 'kg', fallback: 280000 },
   { key: 'thịt gà ta', query: 'thịt gà ta', unit: 'kg', fallback: 140000 },
   { key: 'thịt gà', query: 'thịt má đùi gà', unit: 'kg', fallback: 95000 },
@@ -31,7 +36,7 @@ const TRACKED_ITEMS = [
 ];
 
 /**
- * Hàm cào giá trực tiếp từ API Bách Hóa Xanh
+ * Cào giá trực tiếp từ API Bách Hóa Xanh
  */
 async function fetchBachHoaXanhPrice(query, expectedUnit) {
   try {
@@ -51,14 +56,13 @@ async function fetchBachHoaXanhPrice(query, expectedUnit) {
     const products = data?.Products || data?.data?.products || [];
     if (!products || products.length === 0) return null;
 
-    // Lọc lấy sản phẩm còn hàng và có giá thực
     const validProduct = products.find((p) => (p.Price || p.FinalPrice) > 0);
     if (!validProduct) return null;
 
     const rawPrice = validProduct.Price || validProduct.FinalPrice || 0;
     const productName = (validProduct.ProductName || validProduct.Name || '').toLowerCase();
 
-    // 1. Nếu đơn vị tính là quả/trái (như trứng, dừa)
+    // Trường hợp quả/trái
     if (expectedUnit === 'quả') {
       const eggMatch = productName.match(/(\d+)\s*(quả|trái|hột)/i);
       if (eggMatch) {
@@ -68,7 +72,7 @@ async function fetchBachHoaXanhPrice(query, expectedUnit) {
       return rawPrice;
     }
 
-    // 2. Nếu đơn vị tính là kg (quy đổi từ gram sang kg)
+    // Trường hợp tính theo khối lượng (kg/g)
     const weightMatch = productName.match(/(\d+)\s*(g|gam|gram|kg)/i);
     if (weightMatch) {
       const val = parseFloat(weightMatch[1]);
@@ -78,12 +82,10 @@ async function fetchBachHoaXanhPrice(query, expectedUnit) {
         return Math.round(rawPrice / val);
       }
       if (['g', 'gam', 'gram'].includes(u) && val > 0) {
-        // Ví dụ: khay 500g giá 85.000đ -> 1kg = (85000 / 500) * 1000 = 170.000đ
         return Math.round((rawPrice / val) * 1000);
       }
     }
 
-    // Nếu tiêu đề ghi theo vỉ/khay chuẩn mặc định ~500g
     if (productName.includes('khay') || productName.includes('vỉ')) {
       return Math.round(rawPrice * 2);
     }
@@ -99,11 +101,9 @@ export async function GET(request) {
   try {
     const results = [];
 
-    // Chạy đồng bộ lần lượt để tránh bị chặn IP (Rate limit)
     for (const item of TRACKED_ITEMS) {
       let finalPrice = await fetchBachHoaXanhPrice(item.query, item.unit);
 
-      // Nếu không cào được hoặc giá bất thường (< 1.000đ), dùng giá fallback
       if (!finalPrice || finalPrice < 1000) {
         finalPrice = item.fallback;
       }
@@ -116,11 +116,9 @@ export async function GET(request) {
         updated_at: new Date().toISOString(),
       });
 
-      // Nghỉ nhẹ 100ms giữa các request để bảo vệ kết nối
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 80));
     }
 
-    // Lưu toàn bộ bảng giá mới vào Supabase
     const { error } = await supabase
       .from('market_prices')
       .upsert(results, { onConflict: 'ingredient_key' });
