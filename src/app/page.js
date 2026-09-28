@@ -21,6 +21,7 @@ import NutritionStatsModal from '../components/NutritionStatsModal';
 import ZeroWasteProfileModal from '../components/ZeroWasteProfileModal';
 import { canManageRecipe, extractUserPhone, isUserAdmin } from '@/lib/permissions';
 import { getCachedData, setCachedData, fetchWithDedupe, CacheKeys } from '@/lib/cacheManager';
+import { fetchMarketPrices, DEFAULT_PRICES } from '@/lib/priceCalculator';
 
 export default function Home() {
   const [recipes, setRecipes] = useState([]);
@@ -36,8 +37,8 @@ export default function Home() {
   // Trạng thái mạng ngoại tuyến
   const [isOffline, setIsOffline] = useState(false);
 
-  // Bảng giá nguyên liệu
-  const [priceMap, setPriceMap] = useState({});
+  // Bảng giá nguyên liệu thị trường tự động
+  const [priceMap, setPriceMap] = useState(DEFAULT_PRICES);
 
   // Kho nguyên liệu tồn kho tủ lạnh
   const [fridgeItems, setFridgeItems] = useState([]);
@@ -221,6 +222,37 @@ export default function Home() {
     }
   };
 
+  const fetchPrices = async () => {
+    // 1. Kiểm tra cache cục bộ
+    const cachedPrices = getCachedData(CacheKeys.PRICES);
+    if (cachedPrices && Object.keys(cachedPrices).length > 0) {
+      setPriceMap(cachedPrices);
+    }
+
+    // 2. Tải bảng giá thị trường mới nhất từ Supabase (market_prices)
+    try {
+      const dynamicPrices = await fetchMarketPrices();
+      if (dynamicPrices && Object.keys(dynamicPrices).length > 0) {
+        setPriceMap(dynamicPrices);
+        setCachedData(CacheKeys.PRICES, dynamicPrices);
+        return;
+      }
+    } catch (err) {
+      console.warn('Lỗi khi fetchMarketPrices từ Supabase:', err);
+    }
+
+    // 3. Fallback qua API nội bộ nếu có
+    try {
+      const data = await fetchWithDedupe('/api/prices');
+      if (data && !data.error) {
+        setPriceMap((prev) => ({ ...prev, ...data }));
+        setCachedData(CacheKeys.PRICES, { ...priceMap, ...data });
+      }
+    } catch (err) {
+      console.warn('Lỗi fetch prices fallback:', err);
+    }
+  };
+
   const fetchKitchen = async (currentUserId) => {
     if (!currentUserId) {
       setKitchenData(null);
@@ -254,23 +286,6 @@ export default function Home() {
         if (Array.isArray(items)) setShoppingList(items);
       })
       .catch((err) => console.error('Lỗi tải giỏ hàng:', err));
-  };
-
-  const fetchPrices = async () => {
-    const cachedPrices = getCachedData(CacheKeys.PRICES);
-    if (cachedPrices && Object.keys(cachedPrices).length > 0) {
-      setPriceMap(cachedPrices);
-    }
-
-    try {
-      const data = await fetchWithDedupe('/api/prices');
-      if (data && !data.error) {
-        setPriceMap(data);
-        setCachedData(CacheKeys.PRICES, data);
-      }
-    } catch (err) {
-      console.warn('Lỗi fetch prices, giữ cache hiện tại:', err);
-    }
   };
 
   useEffect(() => {
