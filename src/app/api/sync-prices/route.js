@@ -1,13 +1,10 @@
 // src/app/api/sync-prices/route.js
 import { NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Rổ từ khóa hàng thiết yếu cần theo dõi giá hàng ngày
 const TRACKED_ITEMS = [
@@ -99,6 +96,18 @@ async function fetchBachHoaXanhPrice(query, expectedUnit) {
 
 export async function GET(request) {
   try {
+    // Khởi tạo Supabase client an toàn bên trong runtime xử lý request
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    const dbClient = (supabaseUrl && supabaseKey)
+      ? createClient(supabaseUrl, supabaseKey)
+      : supabase;
+
+    if (!dbClient) {
+      throw new Error('Supabase client chưa được cấu hình biến môi trường.');
+    }
+
     const results = [];
 
     for (const item of TRACKED_ITEMS) {
@@ -119,7 +128,7 @@ export async function GET(request) {
       await new Promise((resolve) => setTimeout(resolve, 80));
     }
 
-    const { error } = await supabase
+    const { error } = await dbClient
       .from('market_prices')
       .upsert(results, { onConflict: 'ingredient_key' });
 
