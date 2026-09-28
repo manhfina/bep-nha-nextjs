@@ -22,6 +22,9 @@ const DEFAULT_PRICES = {
   'mực': { price_per_unit: 220000, unit: 'kg' },
   'cá': { price_per_unit: 90000, unit: 'kg' },
   'cá lóc': { price_per_unit: 110000, unit: 'kg' },
+  'sườn non': { price_per_unit: 160000, unit: 'kg' },
+  'sườn heo': { price_per_unit: 150000, unit: 'kg' },
+  'sườn': { price_per_unit: 150000, unit: 'kg' },
 
   // Nhóm dừa & quả đặc thù
   'nước dừa tươi': { price_per_unit: 20000, unit: 'quả' },
@@ -210,6 +213,7 @@ function findMatchedPrice(cleanName, priceMap = {}) {
   if (cleanName.includes('tôm')) return merged['tôm'];
   if (cleanName.includes('cá')) return merged['cá'];
   if (cleanName.includes('mì')) return merged['mì'];
+  if (cleanName.includes('sườn')) return merged['sườn non'] || { price_per_unit: 160000, unit: 'kg' };
 
   return null;
 }
