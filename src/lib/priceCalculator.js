@@ -3,13 +3,25 @@ import { supabase } from './supabase';
 
 // Bảng giá thị trường chuẩn Việt Nam (Fallback khi offline hoặc chưa đồng bộ được)
 export const DEFAULT_PRICES = {
+  // Nhóm xương & sườn (cực kỳ quan trọng để không bị tính nhầm giá thịt)
+  'xương ống bò': { price_per_unit: 60000, unit: 'kg' },
+  'xương bò': { price_per_unit: 60000, unit: 'kg' },
+  'xương ống': { price_per_unit: 50000, unit: 'kg' },
+  'xương heo': { price_per_unit: 55000, unit: 'kg' },
+  'xương': { price_per_unit: 50000, unit: 'kg' },
+  'sườn non': { price_per_unit: 160000, unit: 'kg' },
+  'sườn heo': { price_per_unit: 150000, unit: 'kg' },
+  'sườn': { price_per_unit: 150000, unit: 'kg' },
+
   // Nhóm thịt & hải sản (đơn vị chuẩn: kg)
   'thịt bò': { price_per_unit: 280000, unit: 'kg' },
   'bắp bò': { price_per_unit: 300000, unit: 'kg' },
+  'thăn bò': { price_per_unit: 290000, unit: 'kg' },
   'thịt xay': { price_per_unit: 140000, unit: 'kg' },
   'thịt heo xay': { price_per_unit: 140000, unit: 'kg' },
   'thịt lợn xay': { price_per_unit: 140000, unit: 'kg' },
   'thịt heo': { price_per_unit: 140000, unit: 'kg' },
+  'thịt nạc vai': { price_per_unit: 145000, unit: 'kg' },
   'thịt ba chỉ': { price_per_unit: 150000, unit: 'kg' },
   'thịt vịt': { price_per_unit: 95000, unit: 'kg' },
   'vịt': { price_per_unit: 95000, unit: 'kg' },
@@ -17,6 +29,9 @@ export const DEFAULT_PRICES = {
   'gà ta': { price_per_unit: 140000, unit: 'kg' },
   'thịt gà': { price_per_unit: 95000, unit: 'kg' },
   'ức gà': { price_per_unit: 85000, unit: 'kg' },
+  'thịt ngan': { price_per_unit: 110000, unit: 'kg' },
+  'ngan': { price_per_unit: 110000, unit: 'kg' },
+  'lươn': { price_per_unit: 180000, unit: 'kg' },
   'cua đồng xay': { price_per_unit: 180000, unit: 'kg' },
   'cua đồng': { price_per_unit: 180000, unit: 'kg' },
   'tôm': { price_per_unit: 200000, unit: 'kg' },
@@ -24,9 +39,6 @@ export const DEFAULT_PRICES = {
   'mực': { price_per_unit: 220000, unit: 'kg' },
   'cá': { price_per_unit: 90000, unit: 'kg' },
   'cá lóc': { price_per_unit: 110000, unit: 'kg' },
-  'sườn non': { price_per_unit: 160000, unit: 'kg' },
-  'sườn heo': { price_per_unit: 150000, unit: 'kg' },
-  'sườn': { price_per_unit: 150000, unit: 'kg' },
 
   // Nhóm dừa & quả đặc thù
   'nước dừa tươi': { price_per_unit: 20000, unit: 'quả' },
@@ -46,6 +58,7 @@ export const DEFAULT_PRICES = {
   'măng củ': { price_per_unit: 35000, unit: 'kg' },
   'măng tươi': { price_per_unit: 35000, unit: 'kg' },
   'măng chua': { price_per_unit: 30000, unit: 'kg' },
+  'măng khô': { price_per_unit: 280000, unit: 'kg' },
   'măng': { price_per_unit: 35000, unit: 'kg' },
   'nấm bào ngư': { price_per_unit: 60000, unit: 'kg' },
   'nấm đùi gà': { price_per_unit: 65000, unit: 'kg' },
@@ -109,9 +122,19 @@ export const DEFAULT_PRICES = {
   'mì chính': { price_per_unit: 45000, unit: 'kg' },
   'tiêu': { price_per_unit: 160000, unit: 'kg' },
 
+  // Gia vị nấu phở & thảo mộc khô
+  'hoa hồi': { price_per_unit: 2000, unit: 'cánh' },
+  'quế': { price_per_unit: 2000, unit: 'thanh' },
+  'thảo quả': { price_per_unit: 2000, unit: 'quả' },
+  'đinh hương': { price_per_unit: 2000, unit: 'nụ' },
+  'hạt mùi': { price_per_unit: 2000, unit: 'phần' },
+
   // Tinh bột & mì
-  'bún tươi': { price_per_unit: 15000, unit: 'kg' },
+  'bánh phở tươi': { price_per_unit: 18000, unit: 'kg' },
+  'bánh phở': { price_per_unit: 18000, unit: 'kg' },
   'phở tươi': { price_per_unit: 18000, unit: 'kg' },
+  'bún tươi': { price_per_unit: 15000, unit: 'kg' },
+  'miến': { price_per_unit: 60000, unit: 'kg' },
   'mì': { price_per_unit: 3500, unit: 'vắt' },
   'mì trứng': { price_per_unit: 4000, unit: 'vắt' },
   'mì tôm': { price_per_unit: 4500, unit: 'gói' },
@@ -198,7 +221,7 @@ export function parseIngredientAmount(ing, baseServings = 2, currentServings = 2
     text = `${ing.name || ''} ${ing.unit || ''} ${ing.amount || ''}`;
   }
 
-  const regex = /([\d.,]+)\s*(kilogram|kg|gam|gram|gr|g|lạng|quả|trái|củ|cây|nhánh|cọng|tép|bó|mớ|miếng|hộp|chai|lít|lit|ml|thìa cà phê|muỗng cà phê|thìa canh|muỗng canh|thìa|muỗng|bát|chén|vắt|gói|ít|chút|nhúm|khẩu phần)?/i;
+  const regex = /([\d.,]+)\s*(kilogram|kg|gam|gram|gr|g|lạng|quả|trái|củ|cây|nhánh|cọng|tép|bó|mớ|miếng|hộp|chai|lít|lit|ml|thìa cà phê|muỗng cà phê|thìa canh|muỗng canh|thìa|muỗng|bát|chén|vắt|gói|ít|chút|nhúm|khẩu phần|cánh|thanh|nụ)?/i;
   const match = text.match(regex);
 
   if (match) {
@@ -235,7 +258,15 @@ function findMatchedPrice(cleanName, priceMap = {}) {
     }
   }
 
-  // 2. Fallback tìm kiếm thông minh theo danh mục lớn
+  // 2. Chặn và ưu tiên XƯƠNG trước khi bị nhận nhầm thành thịt bò/heo
+  if (cleanName.includes('xương')) {
+    if (cleanName.includes('bò')) return merged['xương ống bò'] || { price_per_unit: 60000, unit: 'kg' };
+    if (cleanName.includes('heo') || cleanName.includes('lợn')) return merged['xương heo'] || { price_per_unit: 55000, unit: 'kg' };
+    return merged['xương ống'] || { price_per_unit: 50000, unit: 'kg' };
+  }
+
+  // 3. Fallback tìm kiếm thông minh theo danh mục lớn
+  if (cleanName.includes('bánh phở') || cleanName.includes('phở tươi') || cleanName.includes('phở')) return merged['bánh phở tươi'];
   if (cleanName.includes('dừa')) return merged['nước dừa tươi'];
   if (cleanName.includes('nước màu') || cleanName.includes('nước hàng')) return merged['nước màu'];
   if (cleanName.includes('hành tím') || cleanName.includes('hành khô')) return merged['hành tím'];
@@ -243,6 +274,8 @@ function findMatchedPrice(cleanName, priceMap = {}) {
   if (cleanName.includes('tỏi')) return merged['tỏi'];
   if (cleanName.includes('sườn')) return merged['sườn non'] || { price_per_unit: 160000, unit: 'kg' };
   if (cleanName.includes('vịt')) return merged['thịt vịt'];
+  if (cleanName.includes('ngan')) return merged['thịt ngan'] || { price_per_unit: 110000, unit: 'kg' };
+  if (cleanName.includes('lươn')) return merged['lươn'] || { price_per_unit: 180000, unit: 'kg' };
   if (cleanName.includes('gà ta')) return merged['thịt gà ta'];
   if (cleanName.includes('gà')) return merged['thịt gà'];
   if (cleanName.includes('nước mắm') || cleanName.includes('mắm')) return merged['nước mắm'];
@@ -263,6 +296,7 @@ function findMatchedPrice(cleanName, priceMap = {}) {
   if (cleanName.includes('cua')) return merged['cua đồng'];
   if (cleanName.includes('tôm')) return merged['tôm'];
   if (cleanName.includes('cá')) return merged['cá'];
+  if (cleanName.includes('miến')) return merged['miến'] || { price_per_unit: 60000, unit: 'kg' };
   if (cleanName.includes('mì')) return merged['mì'];
 
   return null;
@@ -319,7 +353,7 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
       finalCost = (amount / 1000) * price;
     }
   }
-  // 2. Khối lượng (g, gram, gr)
+  // 2. Khối lượng (g, gam, gr)
   else if (['g', 'gam', 'gr', 'gram'].includes(unit)) {
     if (standardUnit === 'kg' || standardUnit === 'lít') {
       finalCost = (amount / 1000) * price;
@@ -348,8 +382,8 @@ export function calculateIngredientCost(ing, priceMap = {}, baseServings = 2, cu
   else if (['lít', 'lit', 'kg', 'kilogram'].includes(unit)) {
     finalCost = amount * price;
   }
-  // 6. Đơn vị đếm (quả, trái, củ, cây, nhánh, tép, vắt, miếng, gói, bó, mớ...)
-  else if (['quả', 'trái', 'miếng', 'vắt', 'cây', 'gói', 'bó', 'mớ', 'chai', 'hộp', 'củ', 'nhánh', 'tép', 'cọng'].includes(unit)) {
+  // 6. Đơn vị đếm (quả, trái, củ, cây, nhánh, tép, vắt, miếng, gói, bó, mớ, cánh, thanh, nụ...)
+  else if (['quả', 'trái', 'miếng', 'vắt', 'cây', 'gói', 'bó', 'mớ', 'chai', 'hộp', 'củ', 'nhánh', 'tép', 'cọng', 'cánh', 'thanh', 'nụ'].includes(unit)) {
     if (standardUnit === 'kg') {
       let kgFactor = 0.1;
 
