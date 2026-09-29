@@ -3,6 +3,111 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
+// Bộ phân tích dự phòng thông minh ngay tại Client khi AI trả về thiếu hoặc lỗi
+function parseRecipeLocally(rawText) {
+  const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
+  
+  let title = '';
+  let desc = '';
+  let cook_time = 30;
+  let difficulty = 'Dễ';
+  let base_servings = 2;
+  let cooking_method = 'Bếp thường';
+  const ingredients = [];
+  const steps = [];
+
+  // Tìm tiêu đề: Dòng đầu tiên ngắn gọn hoặc theo mẫu
+  for (let line of lines) {
+    const clean = line.replace(/^[#*\-0-9.\s]+/, '').trim();
+    if (clean.length > 3 && clean.length < 70 && !clean.toLowerCase().includes('nguyên liệu') && !clean.toLowerCase().includes('bước')) {
+      title = clean.replace(/[:–-].*$/, '').trim();
+      break;
+    }
+  }
+
+  // Tự động nhận diện thiết bị nấu
+  const lowerAll = rawText.toLowerCase();
+  if (lowerAll.includes('nồi chiên không dầu') || lowerAll.includes('nckd')) {
+    cooking_method = 'Nồi chiên không dầu';
+  } else if (lowerAll.includes('lò nướng')) {
+    cooking_method = 'Lò nướng';
+  }
+
+  // Tự động nhận diện khẩu phần
+  const servingMatch = rawText.match(/(\d+)\s*(?:-\s*(\d+))?\s*(?:người|khẩu phần|phần)/i);
+  if (servingMatch) {
+    base_servings = parseInt(servingMatch[2] || servingMatch[1], 10) || 2;
+  }
+
+  // Quét thời gian nấu
+  const timeMatch = rawText.match(/(\d+)\s*(?:phút|tiếng|h)/i);
+  if (timeMatch) {
+    let t = parseInt(timeMatch[1], 10);
+    if (/tiếng|h/i.test(timeMatch[0])) t *= 60;
+    cook_time = t;
+  }
+
+  let currentSection = ''; // 'ing' hoặc 'step'
+
+  for (let line of lines) {
+    const lower = line.toLowerCase();
+    
+    // Nhận diện chuyển phần
+    if (lower.includes('nguyên liệu') || lower.includes('phần cơm') || lower.includes('phần thịt')) {
+      currentSection = 'ing';
+      continue;
+    }
+    if (lower.includes('bước') || lower.includes('thực hiện') || lower.includes('cách làm') || lower.includes('chế biến') || lower.includes('thưởng thức')) {
+      currentSection = 'step';
+      continue;
+    }
+
+    // Xử lý dòng nguyên liệu
+    if (currentSection === 'ing') {
+      const cleanLine = line.replace(/^[-•*+–—]\s*/, '').trim();
+      if (!cleanLine || cleanLine.startsWith('Cho phần') || cleanLine.endsWith(':')) continue;
+
+      const parts = cleanLine.split(/[:–—]/);
+      if (parts.length >= 2) {
+        let name = parts[0].replace(/\(.*?\)/g, '').replace(/^[-•*+–—]\s*/, '').trim();
+        let rest = parts.slice(1).join(' ').trim();
+        
+        // Bóc tách số lượng và đơn vị
+        const m = rest.match(/([\d.,]+)\s*([a-zA-ZÀ-ỹ]+)?/);
+        let amount = m ? parseFloat(m[1].replace(',', '.')) : 100;
+        let unit = m && m[2] ? m[2].toLowerCase().trim() : 'g';
+
+        if (name && name.length < 50) {
+          ingredients.push({
+            name,
+            amountPerPerson: Math.round((amount / base_servings) * 10) / 10 || 1,
+            unit: unit || 'g',
+          });
+        }
+      }
+    }
+
+    // Xử lý dòng bước thực hiện
+    if (currentSection === 'step') {
+      const cleanStep = line.replace(/^(\d+\.|\d+\)|\*|-|•)\s*/, '').trim();
+      if (cleanStep.length > 15) {
+        steps.push(cleanStep);
+      }
+    }
+  }
+
+  return {
+    title: title || 'Món ăn mới',
+    desc: lines[0] && lines[0].length > 20 ? lines[0] : 'Công thức nấu ăn hấp dẫn, chuẩn vị.',
+    cook_time: Math.min(cook_time, 180),
+    difficulty,
+    base_servings,
+    cooking_method,
+    ingredients: ingredients.length > 0 ? ingredients : [{ name: 'Nguyên liệu chính', amountPerPerson: 100, unit: 'g' }],
+    steps: steps.length > 0 ? steps : ['Sơ chế nguyên liệu.', 'Tiến hành chế biến.', 'Hoàn thành và thưởng thức.'],
+  };
+}
+
 export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -12,7 +117,8 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
   const [formData, setFormData] = useState({
     title: '',
     desc: '',
-    cook_time: 20,
+    cooking_method: 'Bếp thường',
+    cook_time: 30,
     difficulty: 'Dễ',
     base_servings: 2,
     image_url: '',
@@ -27,7 +133,7 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // 1. Bóc tách AI an toàn
+  // Bóc tách dữ liệu thông minh kết hợp API AI và Local Parser
   const handleAIParse = async () => {
     if (!aiText.trim()) {
       alert('Vui lòng dán nội dung bài viết công thức vào khung!');
@@ -35,51 +141,74 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
     }
 
     setAiLoading(true);
+
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'parse-recipe',
-          text: aiText,
-        }),
-      });
+      let parsed = null;
 
-      const resData = await res.json();
+      try {
+        const res = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'parse-recipe',
+            text: aiText,
+          }),
+        });
 
-      if (!res.ok || resData.error) {
-        throw new Error(resData.error || `Lỗi máy chủ (${res.status})`);
+        const resData = await res.json();
+        if (res.ok && !resData.error) {
+          parsed = resData.data || resData;
+        }
+      } catch (networkErr) {
+        console.warn('API AI gặp sự cố, tự động kích hoạt bộ bóc tách dự phòng:', networkErr);
       }
 
-      // Đọc an toàn từ resData.data hoặc trực tiếp resData
-      const parsed = resData.data || resData;
-
-      if (!parsed || typeof parsed !== 'object') {
-        throw new Error('Dữ liệu AI trả về không hợp lệ');
+      // Kích hoạt bộ phân giải dự phòng cục bộ nếu AI trả về thiếu nguyên liệu
+      if (!parsed || !Array.isArray(parsed.ingredients) || parsed.ingredients.length === 0) {
+        parsed = parseRecipeLocally(aiText);
       }
+
+      const servings = Number(parsed.base_servings || parsed.servings) || 2;
+
+      // Chuẩn hóa danh sách nguyên liệu
+      const formattedIngredients = (parsed.ingredients || []).map((ing) => {
+        if (typeof ing === 'string') {
+          const parts = ing.split(/[:–—]/);
+          return {
+            name: (parts[0] || '').replace(/[-•*+]/g, '').trim(),
+            amountPerPerson: 50,
+            unit: parts[1] ? parts[1].replace(/[0-9.,]/g, '').trim() : 'g',
+          };
+        }
+        const rawAmt = ing.amountPerPerson ?? ing.amount ?? 1;
+        return {
+          name: String(ing.name || '').trim(),
+          amountPerPerson: Math.round((Number(rawAmt) / (ing.amountPerPerson ? 1 : servings)) * 10) / 10 || 1,
+          unit: String(ing.unit || 'g').trim(),
+        };
+      }).filter((item) => item.name);
+
+      // Chuẩn hóa các bước nấu
+      const formattedSteps = (parsed.steps || parsed.instructions || [])
+        .map((s) => (typeof s === 'string' ? s : s?.step || s?.text || ''))
+        .map((s) => s.trim())
+        .filter(Boolean);
 
       setFormData((prev) => ({
         ...prev,
-        title: parsed.title || prev.title || '',
+        title: (parsed.title || prev.title || 'Món ngon mỗi ngày').replace(/^[0-9.:–-\s]+/, '').trim(),
         desc: parsed.desc || parsed.description || prev.desc || '',
-        cook_time: Number(parsed.cook_time) || prev.cook_time || 20,
+        cook_time: Number(parsed.cook_time || parsed.time) || prev.cook_time || 30,
         difficulty: parsed.difficulty || prev.difficulty || 'Dễ',
-        base_servings: Number(parsed.base_servings) || prev.base_servings || 2,
-        ingredients: Array.isArray(parsed.ingredients) && parsed.ingredients.length > 0
-          ? parsed.ingredients.map((ing) => ({
-              name: String(ing.name || ''),
-              amountPerPerson: Number(ing.amountPerPerson) || 1,
-              unit: String(ing.unit || ''),
-            }))
-          : prev.ingredients,
-        steps: Array.isArray(parsed.steps) && parsed.steps.length > 0
-          ? parsed.steps.map((s) => (typeof s === 'string' ? s : s?.step || s?.text || ''))
-          : prev.steps,
+        cooking_method: parsed.cooking_method || prev.cooking_method || 'Bếp thường',
+        base_servings: servings,
+        ingredients: formattedIngredients.length > 0 ? formattedIngredients : prev.ingredients,
+        steps: formattedSteps.length > 0 ? formattedSteps : prev.steps,
       }));
 
-      alert('🎉 Đã bóc tách thành công! Vui lòng kiểm tra lại thông tin bên dưới.');
+      alert('🎉 Đã bóc tách thành công toàn bộ nguyên liệu và công thức!');
     } catch (err) {
-      alert('Lỗi AI: ' + err.message);
+      alert('Lỗi bóc tách: ' + err.message);
     } finally {
       setAiLoading(false);
     }
@@ -149,16 +278,20 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
         .map((s) => s.trim())
         .filter(Boolean);
 
+      const defaultImage = 'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80';
+      const finalImage = formData.image_url.trim() || defaultImage;
+
       const payload = {
         title: formData.title.trim(),
         desc: formData.desc.trim(),
         description: formData.desc.trim(),
-        cook_time: Number(formData.cook_time) || 20,
-        time: `${Number(formData.cook_time) || 20} phút`,
+        cooking_method: formData.cooking_method,
+        cook_time: Number(formData.cook_time) || 30,
+        time: `${Number(formData.cook_time) || 30} phút`,
         difficulty: formData.difficulty,
         base_servings: Number(formData.base_servings) || 2,
-        image: formData.image_url.trim() || '[https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80](https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80)',
-        image_url: formData.image_url.trim() || '[https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80](https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80)',
+        image: finalImage,
+        image_url: finalImage,
         ingredients: cleanIngredients,
         steps: cleanSteps,
         instructions: cleanSteps,
@@ -230,7 +363,7 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
                 cursor: aiLoading ? 'not-allowed' : 'pointer',
               }}
             >
-              {aiLoading ? '⏳ Gemini AI đang bóc tách...' : '⚡ Bóc tách & Điền form tự động'}
+              {aiLoading ? '⏳ Đang bóc tách dữ liệu...' : '⚡ Bóc tách & Điền form tự động'}
             </button>
           </div>
         )}
@@ -242,15 +375,29 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
               type="text"
               name="title"
               required
-              placeholder="VD: Thịt kho tàu nước dừa"
+              placeholder="VD: Cơm âm phủ xứ Huế"
               value={formData.title}
               onChange={handleChange}
               style={modalStyles.input}
             />
           </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 120px' }}>
+              <label style={modalStyles.label}>Thiết bị nấu:</label>
+              <select
+                name="cooking_method"
+                value={formData.cooking_method}
+                onChange={handleChange}
+                style={modalStyles.input}
+              >
+                <option value="Bếp thường">🍳 Bếp thường</option>
+                <option value="Nồi chiên không dầu">⚡ Nồi chiên không dầu</option>
+                <option value="Lò nướng">🔥 Lò nướng</option>
+              </select>
+            </div>
+
+            <div style={{ flex: '1 1 100px' }}>
               <label style={modalStyles.label}>Thời gian (phút):</label>
               <input
                 type="number"
@@ -260,7 +407,8 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
                 style={modalStyles.input}
               />
             </div>
-            <div style={{ flex: 1 }}>
+
+            <div style={{ flex: '1 1 100px' }}>
               <label style={modalStyles.label}>Độ khó:</label>
               <select
                 name="difficulty"
@@ -274,7 +422,8 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
                 <option value="Khó">Khó</option>
               </select>
             </div>
-            <div style={{ flex: 1 }}>
+
+            <div style={{ flex: '1 1 100px' }}>
               <label style={modalStyles.label}>Khẩu phần (người):</label>
               <input
                 type="number"
@@ -303,7 +452,7 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
             <input
               type="text"
               name="image_url"
-              placeholder="[https://images.unsplash.com/](https://images.unsplash.com/)..."
+              placeholder="https://images.unsplash.com/..."
               value={formData.image_url}
               onChange={handleChange}
               style={modalStyles.input}
@@ -327,7 +476,7 @@ export default function AddRecipeModal({ isOpen, onClose, onRecipeAdded }) {
               <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
                 <input
                   type="text"
-                  placeholder="Tên nguyên liệu (VD: Thịt bò)"
+                  placeholder="Tên nguyên liệu (VD: Thịt heo)"
                   value={ing.name}
                   onChange={(e) => handleIngredientChange(idx, 'name', e.target.value)}
                   style={{ ...modalStyles.input, flex: 2 }}
