@@ -133,31 +133,61 @@ export default function RecipeCard({
             </span>
           )}
 
-          {/* Huy hiệu Nồi chiên không dầu với SVG icon tinh tế */}
+          {/* Huy hiệu Icon Nồi chiên không dầu (Không chữ, chỉ icon nổi bật) */}
 {cookingMethod === 'Nồi chiên không dầu' && (
   <span
+    title="Món làm bằng Nồi chiên không dầu"
     style={{
       display: 'inline-flex',
       alignItems: 'center',
-      gap: '4px',
-      fontSize: '0.75rem',
-      color: '#d35400',
+      justifyContent: 'center',
       backgroundColor: '#fff4eb',
       border: '1px solid #ffd8be',
-      padding: '2px 8px',
+      padding: '3px 7px',
       borderRadius: '8px',
-      fontWeight: '700',
-      boxShadow: '0 1px 2px rgba(211, 84, 0, 0.08)'
+      boxShadow: '0 1px 3px rgba(211, 84, 0, 0.08)',
+      cursor: 'pointer',
     }}
   >
-    {/* Icon nồi chiên khay kéo */}
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d35400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="3" width="16" height="18" rx="4" />
-      <circle cx="12" cy="7" r="1.2" fill="#d35400" />
-      <line x1="4" y1="11" x2="20" y2="11" />
-      <rect x="10" y="14" width="4" height="2" rx="0.5" fill="#d35400" />
-    </svg>
-    NCKD
+    <img
+      src="https://cdn-icons-png.flaticon.com/512/7154/7154784.png"
+      alt="Nồi chiên không dầu"
+      style={{
+        width: '18px',
+        height: '18px',
+        objectFit: 'contain',
+        display: 'block'
+      }}
+    />
+  </span>
+)}
+
+{/* Tương tự cho Lò nướng (nếu có) */}
+{cookingMethod === 'Lò nướng' && (
+  <span
+    title="Món làm bằng Lò nướng"
+    style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#fbe9e7',
+      border: '1px solid #ffccbc',
+      padding: '3px 7px',
+      borderRadius: '8px',
+      boxShadow: '0 1px 3px rgba(192, 57, 43, 0.08)',
+      cursor: 'pointer',
+    }}
+  >
+    <img
+      src="https://cdn-icons-png.flaticon.com/512/2143/2143150.png"
+      alt="Lò nướng"
+      style={{
+        width: '18px',
+        height: '18px',
+        objectFit: 'contain',
+        display: 'block'
+      }}
+    />
   </span>
 )}
 
