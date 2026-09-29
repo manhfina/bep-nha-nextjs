@@ -133,32 +133,48 @@ export default function RecipeCard({
             </span>
           )}
 
-          {/* Huy hiệu Icon Nồi chiên không dầu (Không chữ, chỉ icon nổi bật) */}
+          {/* Huy hiệu Nồi chiên không dầu - Đậm nét, to rõ, chuẩn Flat Design */}
 {cookingMethod === 'Nồi chiên không dầu' && (
   <span
     title="Món làm bằng Nồi chiên không dầu"
     style={{
       display: 'inline-flex',
       alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#fff4eb',
-      border: '1px solid #ffd8be',
-      padding: '3px 7px',
+      gap: '5px',
+      backgroundColor: '#fff7ed',
+      border: '1px solid #fdba74',
+      padding: '3px 8px',
       borderRadius: '8px',
-      boxShadow: '0 1px 3px rgba(211, 84, 0, 0.08)',
+      boxShadow: '0 1px 3px rgba(234, 88, 12, 0.12)',
       cursor: 'pointer',
     }}
   >
-    <img
-      src="https://cdn-icons-png.flaticon.com/512/7154/7154784.png"
-      alt="Nồi chiên không dầu"
-      style={{
-        width: '18px',
-        height: '18px',
-        objectFit: 'contain',
-        display: 'block'
-      }}
-    />
+    {/* SVG Nồi chiên không dầu vẽ chuẩn tỉ lệ, to rõ, màu cam/đen công nghệ */}
+    <svg width="20" height="20" viewBox="0 0 48 48" fill="none" style={{ display: 'block' }}>
+      {/* Thân nồi chiên hình vòm bo tròn sang trọng */}
+      <rect x="7" y="5" width="34" height="38" rx="8" fill="#ea580c" />
+      <path d="M7 13C7 8.58172 10.5817 5 15 5H33C37.4183 5 41 8.58172 41 13V15H7V13Z" fill="#c2410c" />
+      
+      {/* Bảng điều khiển cảm ứng LED phía trên */}
+      <rect x="13" y="8" width="22" height="5" rx="2.5" fill="#1e293b" />
+      <circle cx="18" cy="10.5" r="1.2" fill="#38bdf8" />
+      <circle cx="24" cy="10.5" r="1.2" fill="#fbbf24" />
+      <circle cx="30" cy="10.5" r="1.2" fill="#4ade80" />
+
+      {/* Ngăn kéo chiên tách biệt bên dưới */}
+      <rect x="9" y="18" width="30" height="22" rx="5" fill="#fff7ed" stroke="#c2410c" strokeWidth="2" />
+      
+      {/* Mặt kính quan sát thực phẩm bên trong */}
+      <rect x="13" y="21" width="22" height="11" rx="3" fill="#fdba74" />
+      <path d="M16 29C18 25 21 25 24 28C27 25 30 25 32 29" stroke="#ea580c" strokeWidth="1.5" strokeLinecap="round" />
+
+      {/* Tay cầm khay chiên kim loại cách nhiệt */}
+      <rect x="21" y="33" width="6" height="4" rx="1.5" fill="#475569" />
+    </svg>
+
+    <span style={{ fontSize: '0.78rem', fontWeight: '800', color: '#c2410c' }}>
+      Nồi chiên
+    </span>
   </span>
 )}
 
