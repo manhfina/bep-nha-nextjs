@@ -133,25 +133,33 @@ export default function RecipeCard({
             </span>
           )}
 
-          {/* Huy hiệu Nồi chiên không dầu */}
-          {cookingMethod === 'Nồi chiên không dầu' && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '3px',
-                fontSize: '0.75rem',
-                color: '#d35400',
-                backgroundColor: '#fff3e0',
-                border: '1px solid #ffe0b2',
-                padding: '2px 8px',
-                borderRadius: '8px',
-                fontWeight: '700',
-              }}
-            >
-              ⚡ NCKD
-            </span>
-          )}
+          {/* Huy hiệu Nồi chiên không dầu với SVG icon tinh tế */}
+{cookingMethod === 'Nồi chiên không dầu' && (
+  <span
+    style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.75rem',
+      color: '#d35400',
+      backgroundColor: '#fff4eb',
+      border: '1px solid #ffd8be',
+      padding: '2px 8px',
+      borderRadius: '8px',
+      fontWeight: '700',
+      boxShadow: '0 1px 2px rgba(211, 84, 0, 0.08)'
+    }}
+  >
+    {/* Icon nồi chiên khay kéo */}
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d35400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="3" width="16" height="18" rx="4" />
+      <circle cx="12" cy="7" r="1.2" fill="#d35400" />
+      <line x1="4" y1="11" x2="20" y2="11" />
+      <rect x="10" y="14" width="4" height="2" rx="0.5" fill="#d35400" />
+    </svg>
+    NCKD
+  </span>
+)}
 
           {/* Huy hiệu Lò nướng */}
           {cookingMethod === 'Lò nướng' && (
