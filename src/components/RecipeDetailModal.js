@@ -46,7 +46,7 @@ function parseIngData(ing) {
   if (typeof ing === 'object' && ing !== null) {
     return {
       name: (ing.name || '').toLowerCase().trim(),
-      amount: parseFloat(ing.amount || ing.amountPerPerson || 100) || 100,
+      amount: parseFloat(ing.amount ?? ing.amountPerPerson ?? 100) || 100,
       unit: (ing.unit || 'g').toLowerCase().trim(),
     };
   }
@@ -78,7 +78,8 @@ function calcNutrition(ingredients = [], servings = 2, baseServings = 2) {
     return { calories: 0, protein: 0, carbs: 0, fat: 0, caloriesPerServing: 0 };
   }
 
-  const ratio = (servings || 2) / (baseServings || 2);
+  const validBase = Number(baseServings) || 2;
+  const ratio = (servings || 2) / validBase;
   let totalCal = 0;
   let totalProtein = 0;
   let totalCarbs = 0;
@@ -167,8 +168,32 @@ export default function RecipeDetailModal({
 
   if (!recipe) return null;
 
+  // Lấy baseServings an toàn từ snake_case hoặc camelCase
+  const baseServings = Number(recipe.base_servings || recipe.baseServings) || 2;
   const totalCost = calculateRecipeTotalCost(recipe, priceMap, servings);
-  const nutrition = calcNutrition(recipe.ingredients || [], servings, recipe.baseServings || 2);
+  const nutrition = calcNutrition(recipe.ingredients || [], servings, baseServings);
+
+  // ĐỒNG BỘ BƯỚC NẤU: Hỗ trợ cả steps lẫn instructions (và parse JSON nếu lưu dạng string)
+  let rawSteps = recipe.steps || recipe.instructions || [];
+  if (typeof rawSteps === 'string') {
+    try {
+      rawSteps = JSON.parse(rawSteps);
+    } catch (e) {
+      rawSteps = [rawSteps];
+    }
+  }
+  const displaySteps = Array.isArray(rawSteps) ? rawSteps : [];
+
+  // Parse nguyên liệu nếu bị lưu dạng string JSON
+  let rawIngredients = recipe.ingredients || [];
+  if (typeof rawIngredients === 'string') {
+    try {
+      rawIngredients = JSON.parse(rawIngredients);
+    } catch (e) {
+      rawIngredients = [];
+    }
+  }
+  const displayIngredients = Array.isArray(rawIngredients) ? rawIngredients : [];
 
   const handleAddNote = async (e) => {
     e.preventDefault();
@@ -234,11 +259,11 @@ export default function RecipeDetailModal({
 
           {/* Ảnh và tiêu đề */}
           <div style={styles.imageContainer}>
-            <img src={recipe.image} alt={recipe.title} style={styles.image} />
+            <img src={recipe.image_url || recipe.image} alt={recipe.title} style={styles.image} />
             <div style={styles.headerInfo}>
               <h2 style={styles.title}>{recipe.title}</h2>
               <div style={styles.metaRow}>
-                <span>⏱️ {recipe.time}</span>
+                <span>⏱️ {recipe.time || `${recipe.cook_time} phút`}</span>
                 <span>🔥 {recipe.difficulty || 'Dễ'}</span>
                 {avgRating && (
                   <span style={styles.avgBadge}>
@@ -351,13 +376,38 @@ export default function RecipeDetailModal({
 
                 <h3 style={styles.sectionTitle}>Nguyên liệu cần chuẩn bị</h3>
                 <ul style={styles.ingredientList}>
-                  {(recipe.ingredients || []).map((item, idx) => {
+                  {displayIngredients.map((item, idx) => {
                     const ingCostInfo = calculateIngredientCost(
                       item,
                       priceMap,
-                      recipe.baseServings || 2,
+                      baseServings,
                       servings
                     );
+
+                    // TÍNH TOÁN SỐ LƯỢNG CHUẨN XÁC:
+                    let displayAmount = '';
+                    let displayName = '';
+                    let displayUnit = '';
+
+                    if (typeof item === 'string') {
+                      displayName = item;
+                    } else {
+                      displayName = item.name;
+                      displayUnit = item.unit || '';
+                      
+                      // Nếu có amountPerPerson thì nhân thẳng với servings
+                      if (item.amountPerPerson != null && !isNaN(parseFloat(item.amountPerPerson))) {
+                        displayAmount = (parseFloat(item.amountPerPerson) * servings)
+                          .toFixed(1)
+                          .replace(/\.0$/, '');
+                      } 
+                      // Nếu chỉ có amount cơ sở thì scale theo tỉ lệ khẩu phần (servings / baseServings)
+                      else if (item.amount != null && !isNaN(parseFloat(item.amount))) {
+                        displayAmount = ((parseFloat(item.amount) * servings) / baseServings)
+                          .toFixed(1)
+                          .replace(/\.0$/, '');
+                      }
+                    }
 
                     return (
                       <li key={idx} style={styles.ingredientItem}>
@@ -367,11 +417,8 @@ export default function RecipeDetailModal({
                               item
                             ) : (
                               <>
-                                <strong>{item.name}</strong>:{' '}
-                                {((item.amountPerPerson || 1) * servings)
-                                  .toFixed(1)
-                                  .replace(/\.0$/, '')}{' '}
-                                {item.unit}
+                                <strong>{displayName}</strong>
+                                {displayAmount ? `: ${displayAmount} ${displayUnit}` : (displayUnit ? `: ${displayUnit}` : '')}
                               </>
                             )}
                           </span>
@@ -389,12 +436,18 @@ export default function RecipeDetailModal({
 
                 <h3 style={styles.sectionTitle}>Các bước thực hiện</h3>
                 <div style={styles.stepList}>
-                  {(recipe.steps || []).map((step, idx) => (
-                    <div key={idx} style={styles.stepItem}>
-                      <span style={styles.stepBadge}>{idx + 1}</span>
-                      <p style={styles.stepText}>{step}</p>
-                    </div>
-                  ))}
+                  {displaySteps.length > 0 ? (
+                    displaySteps.map((step, idx) => (
+                      <div key={idx} style={styles.stepItem}>
+                        <span style={styles.stepBadge}>{idx + 1}</span>
+                        <p style={styles.stepText}>{typeof step === 'string' ? step : step?.step || step?.text || ''}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.88rem' }}>
+                      Chưa có bước thực hiện cụ thể cho món này. Bấm "✏️ Sửa" để bổ sung nhé!
+                    </p>
+                  )}
                 </div>
               </>
             ) : (
