@@ -46,9 +46,24 @@ export async function POST(request) {
     const body = await request.json();
     const { requesterPhone, ...insertData } = body;
 
+    // Chuẩn hóa và đồng bộ 2 chiều các bước nấu và mô tả khi tạo mới
+    const finalSteps = Array.isArray(insertData.steps) && insertData.steps.length > 0
+      ? insertData.steps
+      : (Array.isArray(insertData.instructions) ? insertData.instructions : []);
+
+    const payload = {
+      ...insertData,
+      cooking_method: insertData.cooking_method || 'Bếp thường',
+      base_servings: Number(insertData.base_servings) || 2,
+      steps: finalSteps,
+      instructions: finalSteps,
+      desc: insertData.desc || insertData.description || '',
+      description: insertData.desc || insertData.description || '',
+    };
+
     const { data, error } = await supabase
       .from('recipes')
-      .insert([insertData])
+      .insert([payload])
       .select();
 
     if (error) {
@@ -124,8 +139,16 @@ export async function PUT(request) {
 
     const cleanUpdate = {};
     if (rawUpdateData.title !== undefined) cleanUpdate.title = String(rawUpdateData.title).trim();
-    if (rawUpdateData.desc !== undefined) cleanUpdate.desc = String(rawUpdateData.desc).trim();
-    if (rawUpdateData.description !== undefined) cleanUpdate.description = String(rawUpdateData.description).trim();
+    
+    // Đồng bộ cả desc và description
+    if (rawUpdateData.desc !== undefined || rawUpdateData.description !== undefined) {
+      const textDesc = String(rawUpdateData.desc || rawUpdateData.description || '').trim();
+      cleanUpdate.desc = textDesc;
+      cleanUpdate.description = textDesc;
+    }
+
+    if (rawUpdateData.cooking_method !== undefined) cleanUpdate.cooking_method = String(rawUpdateData.cooking_method).trim();
+    if (rawUpdateData.base_servings !== undefined) cleanUpdate.base_servings = Number(rawUpdateData.base_servings) || 2;
     if (rawUpdateData.time !== undefined) cleanUpdate.time = String(rawUpdateData.time).trim();
     if (rawUpdateData.cook_time !== undefined) cleanUpdate.cook_time = Number(rawUpdateData.cook_time) || 15;
     if (rawUpdateData.difficulty !== undefined) cleanUpdate.difficulty = String(rawUpdateData.difficulty).trim();
@@ -135,8 +158,14 @@ export async function PUT(request) {
     if (rawUpdateData.ingredients !== undefined) {
       cleanUpdate.ingredients = Array.isArray(rawUpdateData.ingredients) ? rawUpdateData.ingredients : [];
     }
-    if (rawUpdateData.steps !== undefined) {
-      cleanUpdate.steps = Array.isArray(rawUpdateData.steps) ? rawUpdateData.steps : [];
+
+    // ĐỒNG BỘ CẢ steps LẪN instructions (Khắc phục triệt để lỗi thiếu bước)
+    if (rawUpdateData.steps !== undefined || rawUpdateData.instructions !== undefined) {
+      const stepsArr = Array.isArray(rawUpdateData.steps) 
+        ? rawUpdateData.steps 
+        : (Array.isArray(rawUpdateData.instructions) ? rawUpdateData.instructions : []);
+      cleanUpdate.steps = stepsArr;
+      cleanUpdate.instructions = stepsArr;
     }
 
     let result = await supabase
