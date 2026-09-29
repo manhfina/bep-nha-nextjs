@@ -7,6 +7,84 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Hàm tự động suy luận Tags từ nguyên liệu & tên món
+function extractFallbackTags(title = '', ingredients = []) {
+  const text = `${title} ${ingredients.map((i) => (typeof i === 'string' ? i : i?.name || '')).join(' ')}`.toLowerCase();
+  const tags = new Set();
+
+  if (/ba chỉ|nạc|thịt heo|thịt lợn|sườn|chả lụa|giò lụa|nem chua|mỡ heo/i.test(text)) {
+    tags.add('thịt heo');
+    tags.add('thịt lợn');
+  }
+  if (/bò|bắp bò|gầu bò|nạm bò|thăn bò|xương ống bò/i.test(text)) {
+    tags.add('thịt bò');
+  }
+  if (/gà|ức gà|đùi gà|cánh gà/i.test(text)) {
+    tags.add('thịt gà');
+  }
+  if (/tôm|tôm sú|tôm đất|tôm khô|tôm chấy/i.test(text)) {
+    tags.add('tôm');
+    tags.add('hải sản');
+  }
+  if (/cua|cua đồng|ghẹ/i.test(text)) {
+    tags.add('cua');
+    tags.add('hải sản');
+  }
+  if (/cá|cá lóc|cá hồi|cá thu/i.test(text)) {
+    tags.add('cá');
+    tags.add('thủy sản');
+  }
+  if (/trứng|trứng gà|trứng vịt|trứng cút/i.test(text)) {
+    tags.add('trứng');
+  }
+  if (/cơm|gạo|nếp|xôi/i.test(text)) {
+    tags.add('cơm');
+    tags.add('tinh bột');
+  }
+  if (/phở|bún|miến|mì/i.test(text)) {
+    tags.add('món nước');
+    tags.add('bún phở');
+  }
+
+  return Array.from(tags);
+}
+
+// Gọi AI để mở rộng Tags ngữ nghĩa phong phú
+async function generateSmartTags(title, desc, ingredients) {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return extractFallbackTags(title, ingredients);
+
+    const ingText = ingredients.map((i) => (typeof i === 'string' ? i : i?.name || '')).join(', ');
+    const prompt = `Phân tích món ăn sau và trả về DUY NHẤT một mảng JSON các từ khóa/nhãn tìm kiếm (tags) ngắn gọn bằng tiếng Việt, bao gồm cả các nhóm thực phẩm gốc (ví dụ nếu có ba chỉ/sườn thì phải có "thịt heo", "thịt lợn"; nếu có bắp bò thì có "thịt bò").
+Tên món: ${title}
+Mô tả: ${desc}
+Nguyên liệu: ${ingText}
+Ví dụ format trả về: ["thịt heo", "thịt lợn", "cơm", "món nướng"]`;
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
+
+    const data = await res.json();
+    const rawOutput = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const match = rawOutput.match(/\[.*?\]/s);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return Array.from(new Set([...parsed.map((t) => String(t).toLowerCase().trim()), ...extractFallbackTags(title, ingredients)]));
+      }
+    }
+  } catch (err) {
+    console.warn('Lỗi sinh smart tags từ AI, dùng fallback:', err.message);
+  }
+  return extractFallbackTags(title, ingredients);
+}
+
 async function verifyPermission(phone) {
   if (!phone) return false;
   const cleanPhone = String(phone).trim();
@@ -46,19 +124,37 @@ export async function POST(request) {
     const body = await request.json();
     const { requesterPhone, ...insertData } = body;
 
-    // Chuẩn hóa và đồng bộ 2 chiều các bước nấu và mô tả khi tạo mới
+    // Chuẩn hóa và đồng bộ 2 chiều các bước nấu
     const finalSteps = Array.isArray(insertData.steps) && insertData.steps.length > 0
       ? insertData.steps
       : (Array.isArray(insertData.instructions) ? insertData.instructions : []);
 
+    const finalIngredients = Array.isArray(insertData.ingredients) ? insertData.ingredients : [];
+    const textDesc = insertData.desc || insertData.description || '';
+    const titleText = String(insertData.title || '').trim();
+    const imageUrl = insertData.image_url || insertData.image || 'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80';
+
+    // Tự động phân tích và tạo tags thông minh
+    const smartTags = insertData.tags && Array.isArray(insertData.tags) && insertData.tags.length > 0
+      ? insertData.tags
+      : await generateSmartTags(titleText, textDesc, finalIngredients);
+
     const payload = {
       ...insertData,
+      title: titleText,
       cooking_method: insertData.cooking_method || 'Bếp thường',
       base_servings: Number(insertData.base_servings) || 2,
+      cook_time: Number(insertData.cook_time) || 20,
+      time: insertData.time || `${Number(insertData.cook_time) || 20} phút`,
+      difficulty: insertData.difficulty || 'Dễ',
       steps: finalSteps,
       instructions: finalSteps,
-      desc: insertData.desc || insertData.description || '',
-      description: insertData.desc || insertData.description || '',
+      desc: textDesc,
+      description: textDesc,
+      ingredients: finalIngredients,
+      image: imageUrl,
+      image_url: imageUrl,
+      tags: smartTags,
     };
 
     const { data, error } = await supabase
@@ -139,7 +235,7 @@ export async function PUT(request) {
 
     const cleanUpdate = {};
     if (rawUpdateData.title !== undefined) cleanUpdate.title = String(rawUpdateData.title).trim();
-    
+
     // Đồng bộ cả desc và description
     if (rawUpdateData.desc !== undefined || rawUpdateData.description !== undefined) {
       const textDesc = String(rawUpdateData.desc || rawUpdateData.description || '').trim();
@@ -152,20 +248,33 @@ export async function PUT(request) {
     if (rawUpdateData.time !== undefined) cleanUpdate.time = String(rawUpdateData.time).trim();
     if (rawUpdateData.cook_time !== undefined) cleanUpdate.cook_time = Number(rawUpdateData.cook_time) || 15;
     if (rawUpdateData.difficulty !== undefined) cleanUpdate.difficulty = String(rawUpdateData.difficulty).trim();
-    if (rawUpdateData.image !== undefined) cleanUpdate.image = String(rawUpdateData.image);
-    if (rawUpdateData.image_url !== undefined) cleanUpdate.image_url = String(rawUpdateData.image_url);
+    
+    if (rawUpdateData.image !== undefined || rawUpdateData.image_url !== undefined) {
+      const img = String(rawUpdateData.image_url || rawUpdateData.image || '');
+      cleanUpdate.image = img;
+      cleanUpdate.image_url = img;
+    }
 
     if (rawUpdateData.ingredients !== undefined) {
       cleanUpdate.ingredients = Array.isArray(rawUpdateData.ingredients) ? rawUpdateData.ingredients : [];
     }
 
-    // ĐỒNG BỘ CẢ steps LẪN instructions (Khắc phục triệt để lỗi thiếu bước)
+    // ĐỒNG BỘ CẢ steps LẪN instructions
     if (rawUpdateData.steps !== undefined || rawUpdateData.instructions !== undefined) {
-      const stepsArr = Array.isArray(rawUpdateData.steps) 
-        ? rawUpdateData.steps 
+      const stepsArr = Array.isArray(rawUpdateData.steps)
+        ? rawUpdateData.steps
         : (Array.isArray(rawUpdateData.instructions) ? rawUpdateData.instructions : []);
       cleanUpdate.steps = stepsArr;
       cleanUpdate.instructions = stepsArr;
+    }
+
+    // Tự động cập nhật tags khi sửa món
+    if (cleanUpdate.title || cleanUpdate.ingredients) {
+      cleanUpdate.tags = await generateSmartTags(
+        cleanUpdate.title || '',
+        cleanUpdate.description || '',
+        cleanUpdate.ingredients || []
+      );
     }
 
     let result = await supabase

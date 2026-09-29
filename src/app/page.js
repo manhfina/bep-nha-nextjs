@@ -221,6 +221,7 @@ export default function Home() {
         'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&q=80',
       baseServings: item.base_servings || item.baseServings || 2,
       steps: item.steps || item.instructions || [],
+      tags: Array.isArray(item.tags) ? item.tags : [],
     };
   };
 
@@ -663,14 +664,32 @@ export default function Home() {
     setSelectedCookingMethod('all');
   };
 
+  // BỘ LỌC TÌM KIẾM THÔNG MINH: Quét tên món, mô tả, nguyên liệu VÀ CỘT TAGS DO AI SINH RA
   const filteredRecipes = recipes.filter((item) => {
-    const matchSearch =
-      item.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.desc?.toLowerCase().includes(searchTerm.toLowerCase());
+    let matchSearch = true;
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase().trim();
+      
+      const inTitle = (item.title || '').toLowerCase().includes(term);
+      const inDesc = (item.desc || item.description || '').toLowerCase().includes(term);
+      
+      // So khớp trong Tags ngữ nghĩa do AI sinh ra (VD: "thịt heo", "thịt bò"...)
+      const inTags = Array.isArray(item.tags) && item.tags.some((t) =>
+        String(t).toLowerCase().includes(term)
+      );
+
+      // So khớp trong tên nguyên liệu
+      const inIngredients = (item.ingredients || []).some((ing) => {
+        const name = typeof ing === 'string' ? ing : ing?.name || '';
+        return name.toLowerCase().includes(term);
+      });
+
+      matchSearch = inTitle || inDesc || inTags || inIngredients;
+    }
 
     const matchTag = selectedTag
       ? (item.ingredients || []).some((ing) => {
-          const ingText = typeof ing === 'string' ? ing : ing.name || '';
+          const ingText = typeof ing === 'string' ? ing : ing?.name || '';
           return ingText.toLowerCase().includes(selectedTag.toLowerCase());
         })
       : true;
